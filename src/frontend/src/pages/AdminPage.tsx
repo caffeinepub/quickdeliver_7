@@ -33,7 +33,7 @@ import { toast } from "sonner";
 import { DeliveryStatus, UserRole } from "../backend";
 import type { Message, Order, UserProfile } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
-import { getBackend } from "../utils/backendSingleton";
+import { getBackend, setBackendIdentity } from "../utils/backendSingleton";
 
 function formatDate(ts: bigint): string {
   return new Date(Number(ts / BigInt(1_000_000))).toLocaleString();
@@ -262,6 +262,7 @@ export default function AdminPage() {
   >({});
 
   const loadOrders = useCallback(async () => {
+    setBackendIdentity(identity ?? undefined);
     setLoadingOrders(true);
     try {
       const backend = await getBackend();
@@ -288,7 +289,7 @@ export default function AdminPage() {
     } finally {
       setLoadingOrders(false);
     }
-  }, []);
+  }, [identity]);
 
   useEffect(() => {
     if (isAuthenticated) loadOrders();
