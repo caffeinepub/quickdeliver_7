@@ -19,30 +19,46 @@
 @layer base {
   :root {
     --radius: 0.75rem;
-    --background: 0.98 0.005 80;
-    --foreground: 0.18 0.02 40;
+
+    /* Base surfaces — warm off-white */
+    --background: 0.98 0.004 90;
+    --foreground: 0.14 0.015 260;
     --card: 1 0 0;
-    --card-foreground: 0.18 0.02 40;
+    --card-foreground: 0.14 0.015 260;
     --popover: 1 0 0;
-    --popover-foreground: 0.18 0.02 40;
-    --primary: 0.62 0.22 38;
+    --popover-foreground: 0.14 0.015 260;
+
+    /* Primary — keep legacy references working */
+    --primary: 0.55 0.19 148;
     --primary-foreground: 1 0 0;
-    --secondary: 0.95 0.015 80;
-    --secondary-foreground: 0.18 0.02 40;
-    --muted: 0.95 0.01 80;
-    --muted-foreground: 0.52 0.01 60;
-    --accent: 0.95 0.04 55;
-    --accent-foreground: 0.62 0.22 38;
+
+    /* Secondary / muted */
+    --secondary: 0.96 0.005 90;
+    --secondary-foreground: 0.14 0.015 260;
+    --muted: 0.96 0.005 90;
+    --muted-foreground: 0.52 0.01 260;
+
+    /* Accent */
+    --accent: 0.96 0.02 148;
+    --accent-foreground: 0.55 0.19 148;
+
+    /* Destructive */
     --destructive: 0.577 0.245 27.325;
     --destructive-foreground: 1 0 0;
-    --border: 0.9 0.01 80;
-    --input: 0.9 0.01 80;
-    --ring: 0.62 0.22 38;
-    --chart-1: 0.646 0.222 41.116;
+
+    /* Borders & inputs */
+    --border: 0.9 0.006 260;
+    --input: 0.9 0.006 260;
+    --ring: 0.55 0.19 148;
+
+    /* Charts */
+    --chart-1: 0.55 0.19 148;
     --chart-2: 0.6 0.118 184.704;
     --chart-3: 0.398 0.07 227.392;
     --chart-4: 0.828 0.189 84.429;
     --chart-5: 0.769 0.188 70.08;
+
+    /* Sidebar */
     --sidebar: 0.985 0 0;
     --sidebar-foreground: 0.145 0 0;
     --sidebar-primary: 0.205 0 0;
@@ -51,17 +67,30 @@
     --sidebar-accent-foreground: 0.205 0 0;
     --sidebar-border: 0.922 0 0;
     --sidebar-ring: 0.708 0 0;
-    --brand: 0.62 0.22 38;
-    --brand-light: 0.92 0.08 55;
+
+    /* Custom brink tokens */
+    --accent-color: oklch(0.55 0.19 148);
+    --accent-hover: oklch(0.48 0.18 148);
+    --hero-bg: oklch(0.12 0.015 260);
+    --hero-fg: oklch(0.97 0.005 90);
+    --hero-muted: oklch(0.65 0.01 260);
+    --steps-bg: oklch(0.97 0.004 260);
+    --card-border: oklch(0.91 0.006 260);
+    --input-bg: oklch(0.985 0.003 260);
+    --header-bg: oklch(1 0 0 / 0.92);
+    --header-border: oklch(0.91 0.006 260);
+    --header-fg: oklch(0.14 0.015 260);
   }
 
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
-    font-family: "Figtree", "Plus Jakarta Sans", system-ui, sans-serif;
+    font-family: "Figtree", system-ui, sans-serif;
   }
+
   h1,
   h2,
   h3,

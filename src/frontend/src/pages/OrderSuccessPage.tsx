@@ -56,7 +56,7 @@ export default function OrderSuccessPage({
   }, []);
 
   return (
-    <main className="min-h-screen bg-secondary/40 flex items-center justify-center px-4 py-16">
+    <main className="min-h-screen pt-16 bg-secondary/40 flex items-center justify-center px-4 py-16">
       <div className="max-w-md w-full">
         {loading ? (
           <div

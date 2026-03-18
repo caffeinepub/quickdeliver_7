@@ -7,12 +7,26 @@ export interface None {
     __kind__: "None";
 }
 export type Option<T> = Some<T> | None;
-export interface http_request_result {
+export interface TransformationOutput {
     status: bigint;
     body: Uint8Array;
     headers: Array<http_header>;
 }
-export interface TransformationOutput {
+export interface Order {
+    id: bigint;
+    customerName: string;
+    status: DeliveryStatus;
+    contactInfo: string;
+    customerPrincipal?: Principal;
+    description: string;
+    address: string;
+    quotedPrice?: bigint;
+}
+export interface http_header {
+    value: string;
+    name: string;
+}
+export interface http_request_result {
     status: bigint;
     body: Uint8Array;
     headers: Array<http_header>;
@@ -27,6 +41,13 @@ export interface ShoppingItem {
 export interface TransformationInput {
     context: Uint8Array;
     response: http_request_result;
+}
+export interface Message {
+    id: bigint;
+    text: string;
+    orderId: bigint;
+    imageKey?: string;
+    timestamp: bigint;
 }
 export type StripeSessionStatus = {
     __kind__: "completed";
@@ -44,22 +65,9 @@ export interface StripeConfiguration {
     allowedCountries: Array<string>;
     secretKey: string;
 }
-export interface DeliveryRequest {
-    id: bigint;
-    customerName: string;
-    status: DeliveryStatus;
-    contactInfo: string;
-    description: string;
-    address: string;
-    quotedPrice?: bigint;
-}
 export interface UserProfile {
     name: string;
     email: string;
-}
-export interface http_header {
-    value: string;
-    name: string;
 }
 export enum DeliveryStatus {
     pending = "pending",
@@ -74,16 +82,19 @@ export enum UserRole {
 export interface backendInterface {
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
     createCheckoutSession(items: Array<ShoppingItem>, successUrl: string, cancelUrl: string): Promise<string>;
-    getAllOrders(): Promise<Array<DeliveryRequest>>;
+    getAllOrders(): Promise<Array<Order>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
-    getOrder(orderId: bigint): Promise<DeliveryRequest | null>;
+    getCustomerOrders(): Promise<Array<Order>>;
+    getOrder(orderId: bigint): Promise<Order | null>;
+    getOrderMessages(orderId: bigint): Promise<Array<Message>>;
     getStripeSessionStatus(sessionId: string): Promise<StripeSessionStatus>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     isStripeConfigured(): Promise<boolean>;
     markOrderPaid(orderId: bigint): Promise<void>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    sendOrderMessage(orderId: bigint, text: string, imageKey: string | null): Promise<void>;
     setOrderPrice(orderId: bigint, priceInCents: bigint): Promise<void>;
     setStripeConfiguration(config: StripeConfiguration): Promise<void>;
     submitDeliveryRequest(customerName: string, contactInfo: string, address: string, description: string): Promise<bigint>;

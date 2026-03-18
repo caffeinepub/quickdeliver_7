@@ -10,26 +10,238 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { useBlobStorage } from "@/hooks/useBlobStorage";
 import {
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
+  ImageIcon,
   Loader2,
+  MessageCircle,
   RefreshCw,
   Save,
+  Send,
   Settings,
   ShieldCheck,
   Users,
+  X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DeliveryStatus, UserRole } from "../backend";
-import type { DeliveryRequest } from "../backend.d";
+import type { Message, Order, UserProfile } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend } from "../utils/backendSingleton";
 
+function formatDate(ts: bigint): string {
+  return new Date(Number(ts / BigInt(1_000_000))).toLocaleString();
+}
+
+interface MessagePanelProps {
+  orderId: bigint;
+}
+
+function MessagePanel({ orderId }: MessagePanelProps) {
+  const { upload, getBlobUrl } = useBlobStorage();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [msgText, setMsgText] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageKey, setImageKey] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const backend = await getBackend();
+      const msgs = await backend.getOrderMessages(orderId);
+      setMessages(msgs.sort((a, b) => Number(a.timestamp - b.timestamp)));
+    } catch {
+      // silent
+    }
+  }, [orderId]);
+
+  useEffect(() => {
+    setLoadingMsgs(true);
+    fetchMessages().finally(() => setLoadingMsgs(false));
+  }, [fetchMessages]);
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setUploading(true);
+    try {
+      const result = await upload(file);
+      setImageKey(result.key);
+      toast.success("Image uploaded");
+    } catch {
+      toast.error("Failed to upload image");
+      setImageFile(null);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImageKey(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleSend = async () => {
+    if (!msgText.trim()) {
+      toast.error("Please enter a message.");
+      return;
+    }
+    setSending(true);
+    try {
+      const backend = await getBackend();
+      await backend.sendOrderMessage(orderId, msgText.trim(), imageKey);
+      setMsgText("");
+      setImageFile(null);
+      setImageKey(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      toast.success("Message sent");
+      await fetchMessages();
+    } catch {
+      toast.error("Failed to send message.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      className="mt-4 border-t border-border pt-4 space-y-4"
+      data-ocid="admin.messages.panel"
+    >
+      <h4 className="font-semibold text-sm flex items-center gap-2 text-foreground">
+        <MessageCircle className="w-4 h-4 text-primary" />
+        Message Customer
+      </h4>
+
+      {/* Compose */}
+      <div className="space-y-3">
+        <Textarea
+          value={msgText}
+          onChange={(e) => setMsgText(e.target.value)}
+          placeholder="Type a message to the customer..."
+          rows={2}
+          className="resize-none text-sm focus-visible:ring-primary"
+          data-ocid="admin.messages.textarea"
+        />
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageSelect}
+            data-ocid="admin.messages.upload_button"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="gap-2 text-xs"
+            data-ocid="admin.messages.secondary_button"
+          >
+            {uploading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ImageIcon className="w-3.5 h-3.5" />
+            )}
+            {uploading ? "Uploading..." : "Attach Image"}
+          </Button>
+
+          {imageFile && (
+            <div className="flex items-center gap-1.5 bg-secondary rounded-lg px-3 py-1.5 text-xs text-foreground">
+              <ImageIcon className="w-3.5 h-3.5 text-primary" />
+              <span className="max-w-[120px] truncate">{imageFile.name}</span>
+              <button
+                type="button"
+                onClick={handleRemoveImage}
+                className="ml-1 text-muted-foreground hover:text-foreground"
+                data-ocid="admin.messages.close_button"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleSend}
+            disabled={sending || uploading}
+            className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs ml-auto"
+            data-ocid="admin.messages.submit_button"
+          >
+            {sending ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+            {sending ? "Sending..." : "Send"}
+          </Button>
+        </div>
+      </div>
+
+      {loadingMsgs ? (
+        <div
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          data-ocid="admin.messages.loading_state"
+        >
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Loading messages...
+        </div>
+      ) : messages.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Message History
+          </p>
+          {messages.map((msg, i) => (
+            <div
+              key={msg.id.toString()}
+              className="bg-secondary/50 rounded-xl p-3 text-sm"
+              data-ocid={`admin.messages.item.${i + 1}`}
+            >
+              <p className="text-foreground leading-relaxed">{msg.text}</p>
+              {msg.imageKey && (
+                <img
+                  src={getBlobUrl(msg.imageKey)}
+                  alt="Attachment sent by admin"
+                  className="mt-2 rounded-lg max-w-full max-h-40 object-contain border border-border"
+                />
+              )}
+              <p className="text-xs text-muted-foreground mt-1.5">
+                {formatDate(msg.timestamp)}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p
+          className="text-xs text-muted-foreground"
+          data-ocid="admin.messages.empty_state"
+        >
+          No messages sent yet.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { login, loginStatus, identity, clear } = useInternetIdentity();
-  const isAuthenticated = loginStatus === "success" && !!identity;
+  const isAuthenticated = !!identity;
 
   const [stripeKey, setStripeKey] = useState("");
   const [allowedCountries, setAllowedCountries] = useState("US,CA,GB");
@@ -39,12 +251,15 @@ export default function AdminPage() {
   const [targetRole, setTargetRole] = useState<UserRole>(UserRole.user);
   const [assigningRole, setAssigningRole] = useState(false);
 
-  // Orders
-  const [orders, setOrders] = useState<DeliveryRequest[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
   const [quotingIds, setQuotingIds] = useState<Set<string>>(new Set());
   const [markingPaidIds, setMarkingPaidIds] = useState<Set<string>>(new Set());
+  const [expandedMsg, setExpandedMsg] = useState<Set<string>>(new Set());
+  const [customerProfiles, setCustomerProfiles] = useState<
+    Record<string, UserProfile | null>
+  >({});
 
   const loadOrders = useCallback(async () => {
     setLoadingOrders(true);
@@ -52,6 +267,21 @@ export default function AdminPage() {
       const backend = await getBackend();
       const all = await backend.getAllOrders();
       setOrders(all.sort((a, b) => Number(b.id - a.id)));
+      const profileEntries = await Promise.all(
+        all
+          .filter((o) => o.customerPrincipal)
+          .map(async (o) => {
+            try {
+              const profile = await backend.getUserProfile(
+                o.customerPrincipal as any,
+              );
+              return [o.id.toString(), profile] as const;
+            } catch {
+              return [o.id.toString(), null] as const;
+            }
+          }),
+      );
+      setCustomerProfiles(Object.fromEntries(profileEntries));
     } catch (err) {
       console.error(err);
       toast.error("Failed to load orders.");
@@ -155,6 +385,15 @@ export default function AdminPage() {
     }
   };
 
+  const toggleMsgPanel = (key: string) => {
+    setExpandedMsg((prev) => {
+      const s = new Set(prev);
+      if (s.has(key)) s.delete(key);
+      else s.add(key);
+      return s;
+    });
+  };
+
   const statusBadge = (status: DeliveryStatus) => {
     if (status === DeliveryStatus.pending)
       return <Badge variant="secondary">Pending</Badge>;
@@ -171,7 +410,7 @@ export default function AdminPage() {
 
   if (!isAuthenticated) {
     return (
-      <main className="min-h-screen bg-secondary/40 flex items-center justify-center px-4">
+      <main className="min-h-screen pt-16 bg-secondary/40 flex items-center justify-center px-4">
         <div className="bg-card rounded-3xl p-10 shadow-elevated text-center max-w-sm w-full">
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <ShieldCheck className="w-7 h-7 text-primary" />
@@ -200,7 +439,7 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-secondary/40">
+    <main className="min-h-screen pt-16 bg-secondary/40">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
@@ -285,6 +524,7 @@ export default function AdminPage() {
                     const key = order.id.toString();
                     const isQuoting = quotingIds.has(key);
                     const isMarkingPaid = markingPaidIds.has(key);
+                    const msgOpen = expandedMsg.has(key);
                     return (
                       <div
                         key={key}
@@ -299,6 +539,14 @@ export default function AdminPage() {
                               </span>
                               {statusBadge(order.status)}
                             </div>
+                            {customerProfiles[key]?.name && (
+                              <p className="text-xs font-semibold text-accent-color flex items-center gap-1">
+                                <span className="text-muted-foreground font-normal">
+                                  Account:
+                                </span>{" "}
+                                {customerProfiles[key]?.name}
+                              </p>
+                            )}
                             <p className="text-sm font-medium">
                               {order.customerName}
                             </p>
@@ -410,6 +658,23 @@ export default function AdminPage() {
                             <span>Payment received. Order complete.</span>
                           </div>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={() => toggleMsgPanel(key)}
+                          className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors pt-1"
+                          data-ocid="admin.messages.open_modal_button"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                          {msgOpen ? "Hide Messages" : "Message Customer"}
+                          {msgOpen ? (
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        {msgOpen && <MessagePanel orderId={order.id} />}
                       </div>
                     );
                   })}

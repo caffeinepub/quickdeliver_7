@@ -16,8 +16,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['Figtree', 'Plus Jakarta Sans', 'system-ui', 'sans-serif'],
-        display: ['Bricolage Grotesque', 'Figtree', 'system-ui', 'sans-serif'],
+        sans: ["Figtree", "system-ui", "sans-serif"],
+        display: ["Bricolage Grotesque", "Figtree", "system-ui", "sans-serif"],
       },
       colors: {
         border: "oklch(var(--border))",
@@ -25,10 +25,6 @@ export default {
         ring: "oklch(var(--ring) / <alpha-value>)",
         background: "oklch(var(--background))",
         foreground: "oklch(var(--foreground))",
-        brand: {
-          DEFAULT: "oklch(var(--brand))",
-          light: "oklch(var(--brand-light))",
-        },
         primary: {
           DEFAULT: "oklch(var(--primary) / <alpha-value>)",
           foreground: "oklch(var(--primary-foreground))",
@@ -74,6 +70,18 @@ export default {
           border: "oklch(var(--sidebar-border))",
           ring: "oklch(var(--sidebar-ring))",
         },
+        /* Brink semantic tokens */
+        "accent-color": "var(--accent-color)",
+        "accent-hover": "var(--accent-hover)",
+        "hero-bg": "var(--hero-bg)",
+        "hero-fg": "var(--hero-fg)",
+        "hero-muted": "var(--hero-muted)",
+        "steps-bg": "var(--steps-bg)",
+        "card-border": "var(--card-border)",
+        "input-bg": "var(--input-bg)",
+        "header-bg": "var(--header-bg)",
+        "header-border": "var(--header-border)",
+        "header-fg": "var(--header-fg)",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -84,6 +92,7 @@ export default {
         xs: "0 1px 2px 0 rgba(0,0,0,0.05)",
         card: "0 2px 12px 0 rgba(0,0,0,0.08)",
         elevated: "0 8px 32px 0 rgba(0,0,0,0.12)",
+        "card-modern": "0 1px 3px 0 rgba(0,0,0,0.06), 0 4px 16px 0 rgba(0,0,0,0.06)",
       },
       keyframes: {
         "accordion-down": {

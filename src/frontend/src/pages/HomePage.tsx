@@ -4,20 +4,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  ArrowRight,
   CheckCircle2,
-  CreditCard,
   Loader2,
   MapPin,
+  MessageCircle,
   Package,
   Phone,
-  Search,
+  Sparkles,
   User,
+  Zap,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { DeliveryStatus } from "../backend";
-import type { DeliveryRequest } from "../backend.d";
+import type { Message } from "../backend.d";
+import { useApp } from "../context/AppContext";
 import { getBackend } from "../utils/backendSingleton";
 
 interface FormState {
@@ -31,34 +33,116 @@ const INITIAL: FormState = { request: "", address: "", name: "", contact: "" };
 
 const HOW_IT_WORKS = [
   {
-    step: "1",
+    step: "01",
     title: "Tell us what you need",
-    desc: "Anything from groceries to specialty items — just describe it in plain language.",
+    desc: "Anything — groceries, car parts, alcohol, cigarettes, and more. Just describe it in plain language.",
   },
   {
-    step: "2",
+    step: "02",
     title: "We review & quote you",
     desc: "Our team reviews your request and sends back a fair price.",
   },
   {
-    step: "3",
+    step: "03",
     title: "Pay & get it delivered",
-    desc: "Once you approve the quote, pay securely and we'll handle delivery.",
+    desc: "Once you approve the quote, pay via the link we send and we'll handle the rest.",
   },
 ];
 
+function formatDate(ts: bigint): string {
+  return new Date(Number(ts / BigInt(1_000_000))).toLocaleString();
+}
+
+function OrderMessages({ orderId }: { orderId: bigint }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const backend = await getBackend();
+      const msgs = await backend.getOrderMessages(orderId);
+      setMessages(msgs.sort((a, b) => Number(a.timestamp - b.timestamp)));
+    } catch {
+      // silent
+    }
+  }, [orderId]);
+
+  useEffect(() => {
+    fetchMessages();
+    intervalRef.current = setInterval(fetchMessages, 10_000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchMessages]);
+
+  if (messages.length === 0) {
+    return (
+      <div
+        className="mt-6 rounded-xl border border-border bg-secondary/30 p-5 text-center"
+        data-ocid="order.messages.empty_state"
+      >
+        <MessageCircle className="w-7 h-7 text-muted-foreground/50 mx-auto mb-2" />
+        <p className="text-sm text-muted-foreground">
+          No messages yet. We&apos;ll reach out here once we review your
+          request.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6" data-ocid="order.messages.panel">
+      <h3 className="font-display font-bold text-sm uppercase tracking-widest text-accent-color mb-3 flex items-center gap-2">
+        <MessageCircle className="w-4 h-4" />
+        Messages from Brink
+      </h3>
+      <div className="space-y-3">
+        {messages.map((msg, i) => (
+          <motion.div
+            key={msg.id.toString()}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.06 }}
+            className="bg-accent-color/5 border border-accent-color/20 rounded-xl p-4"
+            data-ocid={`order.messages.item.${i + 1}`}
+          >
+            <p className="text-sm text-foreground leading-relaxed">
+              {msg.text}
+            </p>
+            {msg.imageKey && (
+              <img
+                src={`/api/blob/${msg.imageKey}`}
+                alt="Attachment from Brink"
+                className="mt-3 rounded-lg max-w-full max-h-56 object-contain border border-border"
+              />
+            )}
+            <p className="text-xs text-muted-foreground mt-2">
+              {formatDate(msg.timestamp)}
+            </p>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function HomePage() {
+  const { userProfile } = useApp();
   const [form, setForm] = useState<FormState>(INITIAL);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [confirmedOrderId, setConfirmedOrderId] = useState<bigint | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [lastOrderId, setLastOrderId] = useState<bigint | null>(null);
 
-  const [lookupId, setLookupId] = useState("");
-  const [isLooking, setIsLooking] = useState(false);
-  const [lookedUpOrder, setLookedUpOrder] = useState<DeliveryRequest | null>(
-    null,
-  );
-  const [lookupError, setLookupError] = useState<string | null>(null);
-  const [isPaying, setIsPaying] = useState(false);
+  // Pre-fill form from user profile
+  useEffect(() => {
+    if (userProfile) {
+      setForm((prev) => ({
+        ...prev,
+        name: prev.name || userProfile.name || "",
+        contact: prev.contact || userProfile.email || "",
+      }));
+    }
+  }, [userProfile]);
 
   const update =
     (field: keyof FormState) =>
@@ -94,7 +178,8 @@ export default function HomePage() {
         address.trim(),
         request.trim(),
       );
-      setConfirmedOrderId(orderId);
+      setLastOrderId(orderId);
+      setSubmitted(true);
       setForm(INITIAL);
       toast.success("Request submitted!");
     } catch (err) {
@@ -105,151 +190,124 @@ export default function HomePage() {
     }
   };
 
-  const handleLookup = async () => {
-    const idNum = lookupId.trim();
-    if (!idNum || Number.isNaN(Number(idNum))) {
-      setLookupError("Please enter a valid order number.");
-      return;
-    }
-    setIsLooking(true);
-    setLookupError(null);
-    setLookedUpOrder(null);
-    try {
-      const backend = await getBackend();
-      const order = await backend.getOrder(BigInt(idNum));
-      if (!order) {
-        setLookupError("Order not found. Please check your order number.");
-      } else {
-        setLookedUpOrder(order);
-      }
-    } catch (err) {
-      console.error(err);
-      setLookupError("Failed to look up order. Please try again.");
-    } finally {
-      setIsLooking(false);
-    }
-  };
-
-  const handlePayNow = async (order: DeliveryRequest) => {
-    if (!order.quotedPrice) return;
-    setIsPaying(true);
-    try {
-      const backend = await getBackend();
-      const successUrl = `${window.location.origin}?page=order-success&session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = `${window.location.origin}?page=home`;
-      const stripeUrl = await backend.createCheckoutSession(
-        [
-          {
-            productName: `Delivery: ${order.description.slice(0, 60)}`,
-            productDescription: `Deliver to: ${order.address}`,
-            currency: "usd",
-            quantity: 1n,
-            priceInCents: order.quotedPrice,
-          },
-        ],
-        successUrl,
-        cancelUrl,
-      );
-      window.location.href = stripeUrl;
-    } catch (err) {
-      console.error(err);
-      toast.error("Payment error. Please try again.");
-      setIsPaying(false);
-    }
-  };
-
-  const statusLabel = (status: DeliveryStatus) => {
-    if (status === DeliveryStatus.pending)
-      return <Badge variant="secondary">Pending Review</Badge>;
-    if (status === DeliveryStatus.quoted)
-      return (
-        <Badge className="bg-amber-100 text-amber-800 border-0">Quoted</Badge>
-      );
-    if (status === DeliveryStatus.paid)
-      return (
-        <Badge className="bg-green-100 text-green-800 border-0">Paid ✓</Badge>
-      );
-    return null;
-  };
-
   return (
     <main className="min-h-screen">
       {/* Hero */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-primary via-primary to-amber-700 py-20 px-4">
+      <section className="relative overflow-hidden bg-hero-bg py-24 px-4">
+        {/* Subtle grid overlay */}
         <div
-          className="absolute inset-0 opacity-10"
+          className="absolute inset-0 opacity-[0.04]"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 70% 30%, oklch(0.95 0.08 55) 0%, transparent 60%)",
+              "linear-gradient(oklch(0.85 0 0) 1px, transparent 1px), linear-gradient(90deg, oklch(0.85 0 0) 1px, transparent 1px)",
+            backgroundSize: "40px 40px",
+          }}
+        />
+        {/* Accent glow */}
+        <div
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] opacity-20 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse at center, oklch(0.72 0.19 148) 0%, transparent 70%)",
           }}
         />
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="max-w-2xl mx-auto text-center text-primary-foreground relative"
+          transition={{ duration: 0.7, ease: "easeOut" }}
+          className="max-w-3xl mx-auto text-center relative"
         >
-          <h1 className="font-display text-4xl sm:text-5xl font-bold leading-tight mb-4">
-            Tell us what you need —
+          <Badge
+            variant="outline"
+            className="mb-6 border-accent-color/30 text-accent-color bg-accent-color/10 text-xs font-semibold tracking-widest uppercase px-4 py-1"
+          >
+            <MapPin className="w-3 h-3 mr-1.5" />
+            Serving Tacoma &amp; the greater Tacoma area
+          </Badge>
+          <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-bold leading-[1.05] tracking-tight mb-6 text-hero-fg">
+            Delivery,
             <br />
-            <span className="italic font-normal opacity-90">
-              we&apos;ll get it delivered.
-            </span>
+            <span className="text-accent-color">on your terms.</span>
           </h1>
-          <p className="text-lg opacity-80 leading-relaxed">
-            No menus. No limits. Describe what you want and we&apos;ll quote you
-            a fair price.
+          <p className="text-lg sm:text-xl text-hero-muted leading-relaxed max-w-2xl mx-auto mb-10">
+            No menus. No limits. Car parts, alcohol, groceries, smokes — if you
+            need it, we&apos;ll get it.
           </p>
+          <a
+            href="#request"
+            className="inline-flex items-center gap-2 bg-accent-color hover:bg-accent-hover text-white font-semibold px-8 py-3.5 rounded-full transition-all duration-200 text-base shadow-lg shadow-accent-color/25 hover:shadow-accent-color/40 hover:-translate-y-0.5"
+            data-ocid="hero.primary_button"
+          >
+            Place a Request
+            <ArrowRight className="w-4 h-4" />
+          </a>
+        </motion.div>
+      </section>
+
+      {/* Best Deal Banner */}
+      <section className="px-4 py-0">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="max-w-2xl mx-auto -mt-6 relative z-10"
+        >
+          <div className="bg-accent-color rounded-2xl px-6 py-4 flex items-center gap-4 shadow-lg shadow-accent-color/30">
+            <div className="shrink-0 w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <p className="text-white font-semibold text-sm sm:text-base leading-snug">
+              Can&apos;t find the price you&apos;re looking for?{" "}
+              <span className="font-bold underline decoration-white/60 underline-offset-2">
+                Let Brink find the best deal.
+              </span>
+            </p>
+          </div>
         </motion.div>
       </section>
 
       {/* Request Form / Confirmation */}
-      <section className="max-w-2xl mx-auto px-4 -mt-10 pb-10">
+      <section id="request" className="max-w-2xl mx-auto px-4 py-12">
         <motion.div
           initial={{ opacity: 0, y: 32 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="bg-card rounded-3xl shadow-elevated p-6 sm:p-8 border border-border"
+          transition={{ duration: 0.55, delay: 0.15 }}
+          className="bg-card rounded-2xl shadow-card-modern border border-card-border p-6 sm:p-8"
         >
           <AnimatePresence mode="wait">
-            {confirmedOrderId !== null ? (
+            {submitted ? (
               <motion.div
                 key="confirmation"
-                initial={{ opacity: 0, scale: 0.96 }}
+                initial={{ opacity: 0, scale: 0.97 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
-                className="text-center py-4"
+                className="py-4"
                 data-ocid="order.success_state"
               >
-                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle2 className="w-8 h-8 text-green-600" />
+                <div className="text-center">
+                  <div className="w-16 h-16 rounded-full bg-accent-color/10 flex items-center justify-center mx-auto mb-5">
+                    <CheckCircle2 className="w-8 h-8 text-accent-color" />
+                  </div>
+                  <h2 className="font-display text-2xl font-bold mb-3">
+                    Request Submitted!
+                  </h2>
+                  <p className="text-muted-foreground leading-relaxed max-w-sm mx-auto">
+                    Your request has been submitted! We&apos;ll review it and
+                    get back to you with a price.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => setSubmitted(false)}
+                    className="mt-6 border-border hover:border-accent-color/50 hover:text-accent-color"
+                    data-ocid="order.secondary_button"
+                  >
+                    Submit another request
+                  </Button>
                 </div>
-                <h2 className="font-display text-2xl font-bold mb-2">
-                  Request Submitted!
-                </h2>
-                <p className="text-muted-foreground mb-4 leading-relaxed">
-                  Your request has been submitted! Your order number is{" "}
-                  <span className="font-bold text-foreground text-lg">
-                    #{confirmedOrderId.toString()}
-                  </span>
-                  .
-                </p>
-                <div className="bg-secondary/60 rounded-2xl p-4 mb-6 text-sm text-muted-foreground leading-relaxed">
-                  We&apos;ll review your request and get back to you with a
-                  price. Use your order number below to check the status.
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setLookupId(confirmedOrderId.toString());
-                    setConfirmedOrderId(null);
-                  }}
-                  className="gap-2"
-                  data-ocid="order.check_status_button"
-                >
-                  <Search className="w-4 h-4" />
-                  Check Order Status
-                </Button>
+
+                {lastOrderId !== null && (
+                  <OrderMessages orderId={lastOrderId} />
+                )}
               </motion.div>
             ) : (
               <motion.div
@@ -258,25 +316,30 @@ export default function HomePage() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
               >
-                <h2 className="font-display text-xl font-bold mb-6 text-foreground">
-                  Place your delivery request
-                </h2>
+                <div className="flex items-center gap-3 mb-7">
+                  <div className="w-9 h-9 rounded-xl bg-accent-color/10 flex items-center justify-center shrink-0">
+                    <Zap className="w-4 h-4 text-accent-color" />
+                  </div>
+                  <h2 className="font-display text-xl font-bold text-foreground">
+                    Place your delivery request
+                  </h2>
+                </div>
                 <div className="space-y-5">
                   <div>
                     <Label
                       htmlFor="request"
-                      className="flex items-center gap-2 text-sm font-semibold mb-1.5"
+                      className="flex items-center gap-2 text-sm font-semibold mb-1.5 text-foreground"
                     >
-                      <Package className="w-4 h-4 text-primary" />
+                      <Package className="w-4 h-4 text-accent-color" />
                       What do you want?
                     </Label>
                     <Textarea
                       id="request"
                       value={form.request}
                       onChange={update("request")}
-                      placeholder="e.g. 2 large coffees from Starbucks on Main St, or a bouquet of red roses, or groceries: milk, eggs, bread..."
+                      placeholder="e.g. a case of beer from Total Wine, car parts (brake pads for a 2018 Honda Civic), a pack of Marlboros, groceries: milk, eggs, bread — anything you need!"
                       rows={3}
-                      className="resize-none focus-visible:ring-primary"
+                      className="resize-none focus-visible:ring-accent-color/50 bg-input-bg border-card-border"
                       data-ocid="order.textarea"
                     />
                   </div>
@@ -284,18 +347,18 @@ export default function HomePage() {
                   <div>
                     <Label
                       htmlFor="address"
-                      className="flex items-center gap-2 text-sm font-semibold mb-1.5"
+                      className="flex items-center gap-2 text-sm font-semibold mb-1.5 text-foreground"
                     >
-                      <MapPin className="w-4 h-4 text-primary" />
+                      <MapPin className="w-4 h-4 text-accent-color" />
                       Delivery address
                     </Label>
                     <Input
                       id="address"
                       value={form.address}
                       onChange={update("address")}
-                      placeholder="123 Main St, Apt 4B, New York, NY 10001"
+                      placeholder="123 Main St, Tacoma, WA 98401"
                       autoComplete="street-address"
-                      className="focus-visible:ring-primary"
+                      className="focus-visible:ring-accent-color/50 bg-input-bg border-card-border"
                       data-ocid="order.address.input"
                     />
                   </div>
@@ -304,9 +367,9 @@ export default function HomePage() {
                     <div>
                       <Label
                         htmlFor="name"
-                        className="flex items-center gap-2 text-sm font-semibold mb-1.5"
+                        className="flex items-center gap-2 text-sm font-semibold mb-1.5 text-foreground"
                       >
-                        <User className="w-4 h-4 text-primary" />
+                        <User className="w-4 h-4 text-accent-color" />
                         Your name
                       </Label>
                       <Input
@@ -315,25 +378,25 @@ export default function HomePage() {
                         onChange={update("name")}
                         placeholder="Jane Smith"
                         autoComplete="name"
-                        className="focus-visible:ring-primary"
+                        className="focus-visible:ring-accent-color/50 bg-input-bg border-card-border"
                         data-ocid="order.name.input"
                       />
                     </div>
                     <div>
                       <Label
                         htmlFor="contact"
-                        className="flex items-center gap-2 text-sm font-semibold mb-1.5"
+                        className="flex items-center gap-2 text-sm font-semibold mb-1.5 text-foreground"
                       >
-                        <Phone className="w-4 h-4 text-primary" />
+                        <Phone className="w-4 h-4 text-accent-color" />
                         Phone / contact
                       </Label>
                       <Input
                         id="contact"
                         value={form.contact}
                         onChange={update("contact")}
-                        placeholder="+1 555 000 0000"
+                        placeholder="+1 253 000 0000"
                         autoComplete="tel"
-                        className="focus-visible:ring-primary"
+                        className="focus-visible:ring-accent-color/50 bg-input-bg border-card-border"
                         data-ocid="order.contact.input"
                       />
                     </div>
@@ -342,17 +405,17 @@ export default function HomePage() {
                   <Button
                     onClick={handleSubmit}
                     disabled={isSubmitting}
-                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-3 text-base rounded-xl"
+                    className="w-full bg-accent-color hover:bg-accent-hover text-white font-bold py-3 text-base rounded-xl shadow-md shadow-accent-color/20 transition-all"
                     data-ocid="order.submit_button"
                   >
                     {isSubmitting ? (
                       <>
                         <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                        Submitting request...
+                        Submitting...
                       </>
                     ) : (
                       <>
-                        <Package className="w-5 h-5 mr-2" />
+                        <ArrowRight className="w-5 h-5 mr-2" />
                         Submit Request
                       </>
                     )}
@@ -372,161 +435,23 @@ export default function HomePage() {
         </motion.div>
       </section>
 
-      {/* Check Order Status */}
-      <section className="max-w-2xl mx-auto px-4 pb-16">
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.35 }}
-          className="bg-card rounded-3xl shadow-card p-6 sm:p-8 border border-border"
-        >
-          <h2 className="font-display text-lg font-bold mb-4 flex items-center gap-2">
-            <Search className="w-5 h-5 text-primary" />
-            Check Order Status
-          </h2>
-          <div className="flex gap-3">
-            <Input
-              value={lookupId}
-              onChange={(e) => {
-                setLookupId(e.target.value);
-                setLookupError(null);
-              }}
-              placeholder="Enter your order number..."
-              className="focus-visible:ring-primary"
-              data-ocid="status.search_input"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleLookup();
-              }}
-            />
-            <Button
-              onClick={handleLookup}
-              disabled={isLooking}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0"
-              data-ocid="status.primary_button"
-            >
-              {isLooking ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                "Check Status"
-              )}
-            </Button>
-          </div>
-
-          <AnimatePresence>
-            {lookupError && (
-              <motion.p
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="text-sm text-destructive mt-3"
-                data-ocid="status.error_state"
-              >
-                {lookupError}
-              </motion.p>
-            )}
-
-            {lookedUpOrder && (
-              <motion.div
-                key={lookedUpOrder.id.toString()}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="mt-5 p-4 bg-secondary/50 rounded-2xl space-y-3"
-                data-ocid="status.card"
-              >
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="font-semibold text-sm">
-                    Order #{lookedUpOrder.id.toString()}
-                  </span>
-                  {statusLabel(lookedUpOrder.status)}
-                </div>
-                <div className="text-sm text-muted-foreground space-y-1">
-                  <p>
-                    <span className="font-medium text-foreground">
-                      Request:
-                    </span>{" "}
-                    {lookedUpOrder.description}
-                  </p>
-                  <p>
-                    <span className="font-medium text-foreground">
-                      Address:
-                    </span>{" "}
-                    {lookedUpOrder.address}
-                  </p>
-                </div>
-
-                {lookedUpOrder.status === DeliveryStatus.pending && (
-                  <p
-                    className="text-sm text-amber-700 bg-amber-50 rounded-xl px-3 py-2"
-                    data-ocid="status.panel"
-                  >
-                    ⏳ Your request is being reviewed. We&apos;ll contact you
-                    with a quote soon.
-                  </p>
-                )}
-
-                {lookedUpOrder.status === DeliveryStatus.quoted &&
-                  lookedUpOrder.quotedPrice !== undefined && (
-                    <div className="space-y-3" data-ocid="status.panel">
-                      <div className="bg-white rounded-xl p-3 flex items-center justify-between border border-border">
-                        <span className="text-sm font-medium">
-                          Quoted Price
-                        </span>
-                        <span className="text-lg font-bold text-primary">
-                          $
-                          {(Number(lookedUpOrder.quotedPrice) / 100).toFixed(2)}
-                        </span>
-                      </div>
-                      <Button
-                        onClick={() => handlePayNow(lookedUpOrder)}
-                        disabled={isPaying}
-                        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold"
-                        data-ocid="status.primary_button"
-                      >
-                        {isPaying ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Redirecting...
-                          </>
-                        ) : (
-                          <>
-                            <CreditCard className="w-4 h-4 mr-2" />
-                            Pay Now
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  )}
-
-                {lookedUpOrder.status === DeliveryStatus.paid && (
-                  <div
-                    className="flex items-center gap-2 bg-green-50 rounded-xl px-3 py-2"
-                    data-ocid="status.success_state"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-                    <span className="text-sm text-green-800 font-medium">
-                      Order confirmed and paid! We&apos;re on it.
-                    </span>
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </section>
-
       {/* How it works */}
-      <section className="bg-secondary/50 py-16 px-4">
+      <section className="bg-steps-bg py-20 px-4">
         <div className="max-w-4xl mx-auto">
-          <motion.h2
+          <motion.div
             initial={{ opacity: 0, y: 16 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
-            className="font-display text-2xl font-bold text-center mb-10"
+            className="text-center mb-12"
           >
-            How QuickDeliver works
-          </motion.h2>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold">
+              How Brink works
+            </h2>
+            <p className="text-muted-foreground mt-3 text-base">
+              Fast, simple, and transparent — from request to doorstep.
+            </p>
+          </motion.div>
           <div className="grid sm:grid-cols-3 gap-6">
             {HOW_IT_WORKS.map((item, i) => (
               <motion.div
@@ -534,13 +459,18 @@ export default function HomePage() {
                 initial={{ opacity: 0, y: 24 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: i * 0.1 }}
-                className="bg-card rounded-2xl p-6 shadow-card text-center"
+                transition={{ duration: 0.4, delay: i * 0.12 }}
+                className="bg-card rounded-2xl p-7 border border-card-border shadow-card-modern relative overflow-hidden group hover:-translate-y-1 transition-transform duration-200"
               >
-                <div className="w-12 h-12 rounded-full bg-primary/10 text-primary font-display font-bold text-lg flex items-center justify-center mx-auto mb-4">
+                <span className="absolute top-4 right-5 font-display text-5xl font-bold text-accent-color/8 select-none">
                   {item.step}
+                </span>
+                <div className="w-10 h-10 rounded-xl bg-accent-color/10 flex items-center justify-center mb-4">
+                  <Zap className="w-5 h-5 text-accent-color" />
                 </div>
-                <h3 className="font-semibold text-base mb-2">{item.title}</h3>
+                <h3 className="font-display font-bold text-base mb-2">
+                  {item.title}
+                </h3>
                 <p className="text-sm text-muted-foreground leading-relaxed">
                   {item.desc}
                 </p>
@@ -549,6 +479,23 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Footer */}
+      <footer className="border-t border-border py-8 px-4 text-center">
+        <p className="text-sm text-muted-foreground">
+          &copy; {new Date().getFullYear()}{" "}
+          <span className="font-semibold text-foreground">Brink</span>. Built
+          with love using{" "}
+          <a
+            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-color hover:underline"
+          >
+            caffeine.ai
+          </a>
+        </p>
+      </footer>
     </main>
   );
 }

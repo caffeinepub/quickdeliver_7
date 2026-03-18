@@ -1,30 +1,29 @@
-# QuickDeliver
+# Brink
 
 ## Current State
-Customers fill in a request form including an estimated budget, and are immediately redirected to Stripe checkout to pay. There is no quote step — the customer sets their own price.
+Brink is a delivery platform for Tacoma. Customers submit open-ended delivery requests on the homepage. An admin reviews requests in the admin dashboard at /admin, sets a price, and messages customers. Customers can view messages inline on the order confirmation screen immediately after submitting. There is no dedicated page for customers to review their past orders. The admin panel has been reporting a "failed to load orders" error due to two bugs: (1) stored login sessions don't set loginStatus to "success", so orders never load on page refresh; (2) the Caffeine admin token stored in sessionStorage is lost across browser restarts.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Order storage in the backend: each order has an ID, customer info (name, contact, address, request), status (pending / quoted / paid), and an optional quoted price set by admin.
-- `submitOrder` backend function: accepts request, address, name, contact. Returns a numeric order ID.
-- `getOrderStatus` backend function: given an order ID, returns the order details (status and quoted price if set). Public — no login required.
-- `adminGetOrders` backend function: admin-only, returns all orders.
-- `setOrderPrice` backend function: admin-only, sets the price (in cents) on an order and moves status to `quoted`.
-- `createCheckoutSessionForOrder` backend function: given an order ID whose status is `quoted`, initiates Stripe checkout for the quoted amount. Marks order as `paid` on success.
-- "Check my order" section on the homepage: customer enters their order ID to see status and, if quoted, a Pay button.
+- `getCustomerOrders()` backend function returning all orders belonging to the caller's principal
+- A "My Orders" page (`/my-orders`) where logged-in customers can see all their past orders and any messages from Brink for each order
+- Navigation link to "My Orders" in the Header when a customer is logged in
+- Route entry for `my-orders` page in App.tsx and types/index.ts
 
 ### Modify
-- Customer form: remove the budget/estimated price field. Submission calls `submitOrder` and shows the returned order ID, with instructions to check back.
-- Admin Orders tab: replace the Stripe Dashboard link with a live list of orders from `adminGetOrders`. Each pending order shows a price-input field and a "Send Quote" button. Quoted/paid orders show their status.
-- "How it works" steps: update step 2 from "Set your budget" to "We review & send you a price", and step 3 to "Pay once you receive the quote".
+- `useInternetIdentity.ts`: When a stored session is found, set loginStatus to "success" (not "idle") so admin orders load after page refresh — already fixed
+- `urlParams.ts`: Persist admin token in localStorage (not just sessionStorage) so it survives browser restarts — already fixed
+- `AdminPage.tsx`: Use `!!identity` check for authentication so admin orders load from stored sessions as well
+- `Header.tsx`: Show "My Orders" link for authenticated non-admin users
 
 ### Remove
-- Budget input field from the customer request form.
-- Direct-to-Stripe checkout on form submission.
+- Nothing
 
 ## Implementation Plan
-1. Regenerate Motoko backend with Order type and all new functions listed above.
-2. Update HomePage: remove budget field, on submit call `submitOrder`, show returned order ID, add order status lookup UI.
-3. Update AdminPage Orders tab: fetch and display orders via `adminGetOrders`, allow admin to input price and call `setOrderPrice`.
-4. Add checkout flow triggered from order status UI calling `createCheckoutSessionForOrder`.
+1. Add `getCustomerOrders() : async [Order]` to main.mo — returns orders where customerPrincipal matches caller
+2. Add `MyOrdersPage.tsx` — shows list of customer's orders with status, description, and inline messages from Brink
+3. Update `types/index.ts` to add `"my-orders"` to the Page type
+4. Update `App.tsx` routing to handle `/my-orders` path and render the page
+5. Update `Header.tsx` to show a "My Orders" button/link when the user is logged in
+6. Update `AdminPage.tsx` isAuthenticated check to `!!identity`
