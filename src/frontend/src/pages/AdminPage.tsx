@@ -18,6 +18,7 @@ import {
   ChevronUp,
   ClipboardList,
   ImageIcon,
+  KeyRound,
   Loader2,
   MessageCircle,
   RefreshCw,
@@ -34,6 +35,8 @@ import { DeliveryStatus, UserRole } from "../backend";
 import type { Message, Order, UserProfile } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend, setBackendIdentity } from "../utils/backendSingleton";
+
+const ADMIN_TOKEN_KEY = "_brink_admin_token";
 
 function formatDate(ts: bigint): string {
   return new Date(Number(ts / BigInt(1_000_000))).toLocaleString();
@@ -129,7 +132,7 @@ function MessagePanel({ orderId }: MessagePanelProps) {
         <Textarea
           value={msgText}
           onChange={(e) => setMsgText(e.target.value)}
-          placeholder="Type a message to the customer..."
+          placeholder="Type a message or paste a payment link..."
           rows={2}
           className="resize-none text-sm focus-visible:ring-primary"
           data-ocid="admin.messages.textarea"
@@ -239,13 +242,80 @@ function MessagePanel({ orderId }: MessagePanelProps) {
   );
 }
 
+/** Reusable token input panel */
+interface TokenInputPanelProps {
+  onSaved: () => void;
+}
+
+function TokenInputPanel({ onSaved }: TokenInputPanelProps) {
+  const [tokenValue, setTokenValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const trimmed = tokenValue.trim();
+    if (!trimmed) {
+      toast.error("Please paste your admin token.");
+      return;
+    }
+    setSaving(true);
+    try {
+      localStorage.setItem(ADMIN_TOKEN_KEY, trimmed);
+      // Reset backend so the token is picked up on next call
+      setBackendIdentity(undefined);
+      toast.success("Admin token saved. Retrying...");
+      setTokenValue("");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Paste the token from your admin share link (the part after{" "}
+        <code className="bg-secondary px-1 rounded">?token=</code>).
+      </p>
+      <div className="flex gap-2">
+        <Input
+          type="text"
+          value={tokenValue}
+          onChange={(e) => setTokenValue(e.target.value)}
+          placeholder="Paste token here..."
+          className="font-mono text-xs focus-visible:ring-primary"
+          data-ocid="admin.token.input"
+        />
+        <Button
+          onClick={handleSave}
+          disabled={saving}
+          size="sm"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 gap-1.5"
+          data-ocid="admin.token.save_button"
+        >
+          {saving ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Save className="w-3.5 h-3.5" />
+          )}
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { login, loginStatus, identity, clear } = useInternetIdentity();
   const isAuthenticated = !!identity;
 
-  const [stripeKey, setStripeKey] = useState("");
-  const [allowedCountries, setAllowedCountries] = useState("US,CA,GB");
-  const [savingStripe, setSavingStripe] = useState(false);
+  // Token section on login screen
+  const [hasToken, setHasToken] = useState(
+    () => !!localStorage.getItem(ADMIN_TOKEN_KEY),
+  );
+  const [tokenSectionOpen, setTokenSectionOpen] = useState(false);
+
+  // Inline token fix when Unauthorized error occurs
+  const [showInlineToken, setShowInlineToken] = useState(false);
 
   const [targetPrincipal, setTargetPrincipal] = useState("");
   const [targetRole, setTargetRole] = useState<UserRole>(UserRole.user);
@@ -253,6 +323,8 @@ export default function AdminPage() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [isUnauthorizedError, setIsUnauthorizedError] = useState(false);
   const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
   const [quotingIds, setQuotingIds] = useState<Set<string>>(new Set());
   const [markingPaidIds, setMarkingPaidIds] = useState<Set<string>>(new Set());
@@ -262,8 +334,12 @@ export default function AdminPage() {
   >({});
 
   const loadOrders = useCallback(async () => {
-    setBackendIdentity(identity ?? undefined);
+    if (!identity) return;
+    setBackendIdentity(identity);
     setLoadingOrders(true);
+    setOrdersError(null);
+    setIsUnauthorizedError(false);
+    setShowInlineToken(false);
     try {
       const backend = await getBackend();
       const all = await backend.getAllOrders();
@@ -285,7 +361,14 @@ export default function AdminPage() {
       setCustomerProfiles(Object.fromEntries(profileEntries));
     } catch (err) {
       console.error(err);
-      toast.error("Failed to load orders.");
+      const msg = err instanceof Error ? err.message : String(err);
+      const unauthorized = msg.includes("Unauthorized");
+      setIsUnauthorizedError(unauthorized);
+      setOrdersError(
+        unauthorized
+          ? "Admin access not recognized. Please enter your admin token below."
+          : "Failed to load orders. Please refresh and try again.",
+      );
     } finally {
       setLoadingOrders(false);
     }
@@ -294,30 +377,6 @@ export default function AdminPage() {
   useEffect(() => {
     if (isAuthenticated) loadOrders();
   }, [isAuthenticated, loadOrders]);
-
-  const handleSaveStripe = async () => {
-    if (!stripeKey.trim()) {
-      toast.error("Please enter a Stripe secret key.");
-      return;
-    }
-    setSavingStripe(true);
-    try {
-      const backend = await getBackend();
-      await backend.setStripeConfiguration({
-        secretKey: stripeKey.trim(),
-        allowedCountries: allowedCountries
-          .split(",")
-          .map((c) => c.trim())
-          .filter(Boolean),
-      });
-      toast.success("Stripe configuration saved");
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to save Stripe configuration");
-    } finally {
-      setSavingStripe(false);
-    }
-  };
 
   const handleAssignRole = async () => {
     if (!targetPrincipal.trim()) {
@@ -352,11 +411,11 @@ export default function AdminPage() {
     try {
       const backend = await getBackend();
       await backend.setOrderPrice(orderId, BigInt(Math.round(amount * 100)));
-      toast.success(`Quote of $${amount.toFixed(2)} sent for order #${key}`);
+      toast.success(`Quote of $${amount.toFixed(2)} set for order #${key}`);
       await loadOrders();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to send quote.");
+      toast.error("Failed to set quote.");
     } finally {
       setQuotingIds((prev) => {
         const s = new Set(prev);
@@ -434,6 +493,44 @@ export default function AdminPage() {
               "Sign in to Admin"
             )}
           </Button>
+
+          {/* Token section — only shown when no token is already saved */}
+          {!hasToken && (
+            <div className="mt-5 text-left">
+              <button
+                type="button"
+                onClick={() => setTokenSectionOpen((v) => !v)}
+                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
+                data-ocid="admin.token.toggle"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Have an admin token?
+                {tokenSectionOpen ? (
+                  <ChevronUp className="w-3.5 h-3.5 ml-auto" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 ml-auto" />
+                )}
+              </button>
+
+              {tokenSectionOpen && (
+                <div className="mt-3 p-4 bg-secondary/60 rounded-2xl">
+                  <TokenInputPanel
+                    onSaved={() => {
+                      setHasToken(true);
+                      setTokenSectionOpen(false);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {hasToken && (
+            <p className="mt-4 text-xs text-muted-foreground flex items-center justify-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-primary" />
+              Admin token saved
+            </p>
+          )}
         </div>
       </main>
     );
@@ -464,9 +561,6 @@ export default function AdminPage() {
           <TabsList className="mb-6">
             <TabsTrigger value="orders" data-ocid="admin.orders.tab">
               Orders
-            </TabsTrigger>
-            <TabsTrigger value="settings" data-ocid="admin.settings.tab">
-              Settings
             </TabsTrigger>
             <TabsTrigger value="roles" data-ocid="admin.roles.tab">
               Roles
@@ -505,6 +599,59 @@ export default function AdminPage() {
                   <p className="text-muted-foreground text-sm">
                     Loading orders...
                   </p>
+                </div>
+              ) : ordersError ? (
+                <div
+                  className="py-8 space-y-4"
+                  data-ocid="admin.orders.error_state"
+                >
+                  <p className="text-sm text-destructive max-w-md">
+                    {ordersError}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadOrders}
+                      className="gap-2"
+                      data-ocid="admin.orders.retry_button"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Try Again
+                    </Button>
+
+                    {isUnauthorizedError && !showInlineToken && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowInlineToken(true)}
+                        className="gap-2 text-primary hover:text-primary/80"
+                        data-ocid="admin.token.open_modal_button"
+                      >
+                        <KeyRound className="w-4 h-4" />
+                        Enter admin token
+                      </Button>
+                    )}
+                  </div>
+
+                  {isUnauthorizedError && showInlineToken && (
+                    <div
+                      className="mt-2 p-4 bg-secondary/60 rounded-2xl max-w-md"
+                      data-ocid="admin.token.panel"
+                    >
+                      <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
+                        <KeyRound className="w-3.5 h-3.5 text-primary" />
+                        Enter Admin Token
+                      </p>
+                      <TokenInputPanel
+                        onSaved={() => {
+                          setShowInlineToken(false);
+                          loadOrders();
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : orders.length === 0 ? (
                 <div
@@ -611,12 +758,12 @@ export default function AdminPage() {
                               {isQuoting ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin" />
-                                  Sending...
+                                  Saving...
                                 </>
                               ) : (
                                 <>
                                   <Save className="w-4 h-4" />
-                                  Send Quote
+                                  Set Quote
                                 </>
                               )}
                             </Button>
@@ -681,72 +828,6 @@ export default function AdminPage() {
                   })}
                 </div>
               )}
-            </div>
-          </TabsContent>
-
-          {/* Settings */}
-          <TabsContent value="settings">
-            <div className="bg-card rounded-2xl shadow-card p-6 max-w-lg">
-              <h2 className="font-display font-bold text-lg flex items-center gap-2 mb-6">
-                <Settings className="w-5 h-5 text-primary" />
-                Stripe Configuration
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="stripeKey">Stripe Secret Key</Label>
-                  <Input
-                    id="stripeKey"
-                    type="password"
-                    value={stripeKey}
-                    onChange={(e) => setStripeKey(e.target.value)}
-                    placeholder="sk_live_..."
-                    className="mt-1 font-mono"
-                    data-ocid="admin.settings.stripe_key.input"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="allowedCountries">
-                    Allowed Countries (comma-separated)
-                  </Label>
-                  <Input
-                    id="allowedCountries"
-                    value={allowedCountries}
-                    onChange={(e) => setAllowedCountries(e.target.value)}
-                    placeholder="US,CA,GB"
-                    className="mt-1"
-                    data-ocid="admin.settings.countries.input"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    ISO 3166-1 alpha-2 country codes
-                  </p>
-                </div>
-                <Button
-                  onClick={handleSaveStripe}
-                  disabled={savingStripe}
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                  data-ocid="admin.settings.save_button"
-                >
-                  {savingStripe ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Configuration
-                    </>
-                  )}
-                </Button>
-                {savingStripe && (
-                  <p
-                    className="text-sm text-muted-foreground"
-                    data-ocid="admin.settings.loading_state"
-                  >
-                    Saving to blockchain...
-                  </p>
-                )}
-              </div>
             </div>
           </TabsContent>
 

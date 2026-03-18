@@ -6,8 +6,6 @@ import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
 import Runtime "mo:core/Runtime";
 import Principal "mo:core/Principal";
-import Stripe "stripe/stripe";
-import OutCall "http-outcalls/outcall";
 import MixinStorage "blob-storage/Mixin";
 import Storage "blob-storage/Storage";
 
@@ -15,6 +13,10 @@ import Storage "blob-storage/Storage";
 
 actor {
   include MixinStorage();
+
+  // Kept for upgrade compatibility -- was used by the old Stripe integration.
+  // Declared here so Motoko does not reject the upgrade with M0169.
+  stable var stripeConfig : ?{ secretKey : Text; allowedCountries : [Text] } = null;
 
   public type DeliveryStatus = { #pending; #quoted; #paid };
   public type Order = {
@@ -47,7 +49,6 @@ actor {
   let orders = Map.empty<Nat, Order>();
   let userProfiles = Map.empty<Principal, UserProfile>();
   let orderMessages = Map.empty<Nat, List.List<Message>>();
-  var stripeConfig : ?Stripe.StripeConfiguration = null;
 
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
@@ -151,47 +152,6 @@ actor {
     };
   };
 
-  public query func isStripeConfigured() : async Bool {
-    stripeConfig != null;
-  };
-
-  public shared ({ caller }) func setStripeConfiguration(config : Stripe.StripeConfiguration) : async () {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #admin))) {
-      Runtime.trap("Unauthorized: Only admins can set Stripe configuration");
-    };
-    stripeConfig := ?config;
-  };
-
-  public shared ({ caller }) func createCheckoutSession(items : [Stripe.ShoppingItem], successUrl : Text, cancelUrl : Text) : async Text {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only authenticated users can create checkout sessions");
-    };
-
-    switch (stripeConfig) {
-      case (null) {
-        Runtime.trap("Stripe is not configured! Contact the admin.");
-      };
-      case (?config) {
-        await Stripe.createCheckoutSession(config, caller, items, successUrl, cancelUrl, transform);
-      };
-    };
-  };
-
-  public shared ({ caller }) func getStripeSessionStatus(sessionId : Text) : async Stripe.StripeSessionStatus {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only authenticated users can start a session");
-    };
-
-    switch (stripeConfig) {
-      case (null) {
-        Runtime.trap("Stripe needs to be first configured! Contact the admin.");
-      };
-      case (?config) {
-        await Stripe.getSessionStatus(config, sessionId, transform);
-      };
-    };
-  };
-
   public shared ({ caller }) func sendOrderMessage(orderId : Nat, text : Text, imageKey : ?Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #admin))) {
       Runtime.trap("Unauthorized: Only admins can send messages");
@@ -235,10 +195,6 @@ actor {
       case (null) { [] };
       case (?messages) { messages.toArray() };
     };
-  };
-
-  public query func transform(input : OutCall.TransformationInput) : async OutCall.TransformationOutput {
-    OutCall.transform(input);
   };
 
   public query ({ caller }) func getCustomerOrders() : async [Order] {
