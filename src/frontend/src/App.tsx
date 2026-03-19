@@ -5,6 +5,7 @@ import Footer from "./components/Footer";
 import Header from "./components/Header";
 import { AppProvider } from "./context/AppContext";
 import AdminPage from "./pages/AdminPage";
+import DriverDashboard from "./pages/DriverDashboard";
 import HomePage from "./pages/HomePage";
 import MyOrdersPage from "./pages/MyOrdersPage";
 import OrderSuccessPage from "./pages/OrderSuccessPage";
@@ -50,11 +51,13 @@ function getInitialPage(): Page {
   if (path === "/admin" || path.startsWith("/admin/")) return "admin";
   if (path === "/my-orders" || path.startsWith("/my-orders/"))
     return "my-orders";
+  if (path === "/driver" || path.startsWith("/driver/")) return "driver";
   const params = new URLSearchParams(window.location.search);
   const p = params.get("page") as Page | null;
   if (p === "order-success") return "order-success";
   if (p === "admin") return "admin";
   if (p === "my-orders") return "my-orders";
+  if (p === "driver") return "driver";
   return "home";
 }
 
@@ -67,6 +70,8 @@ function AppContent() {
       if (path === "/admin" || path.startsWith("/admin/")) setPage("admin");
       else if (path === "/my-orders" || path.startsWith("/my-orders/"))
         setPage("my-orders");
+      else if (path === "/driver" || path.startsWith("/driver/"))
+        setPage("driver");
       else setPage("home");
     };
     window.addEventListener("popstate", handlePopState);
@@ -86,6 +91,7 @@ function AppContent() {
         {page === "order-success" && <OrderSuccessPage onNavigate={navigate} />}
         {page === "admin" && <AdminPage />}
         {page === "my-orders" && <MyOrdersPage onNavigate={navigate} />}
+        {page === "driver" && <DriverDashboard />}
       </div>
       <Footer />
       <Toaster richColors position="top-right" />

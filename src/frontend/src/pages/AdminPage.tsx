@@ -12,13 +12,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useBlobStorage } from "@/hooks/useBlobStorage";
+import type { Principal } from "@icp-sdk/core/principal";
 import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  Copy,
   ImageIcon,
-  KeyRound,
   Loader2,
   MessageCircle,
   RefreshCw,
@@ -26,17 +27,21 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Truck,
   Users,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DeliveryStatus, UserRole } from "../backend";
-import type { Message, Order, UserProfile } from "../backend.d";
+import type {
+  DriverApplication,
+  Message,
+  Order,
+  UserProfile,
+} from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend, setBackendIdentity } from "../utils/backendSingleton";
-
-const ADMIN_TOKEN_KEY = "_brink_admin_token";
 
 function formatDate(ts: bigint): string {
   return new Date(Number(ts / BigInt(1_000_000))).toLocaleString();
@@ -242,63 +247,314 @@ function MessagePanel({ orderId }: MessagePanelProps) {
   );
 }
 
-/** Reusable token input panel */
-interface TokenInputPanelProps {
-  onSaved: () => void;
-}
+function DriversTab() {
+  const [principalInput, setPrincipalInput] = useState("");
+  const [drivers, setDrivers] = useState<Principal[]>([]);
+  const [loadingDrivers, setLoadingDrivers] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [demoting, setDemoting] = useState<string | null>(null);
+  const [applications, setApplications] = useState<DriverApplication[]>([]);
+  const [loadingApps, setLoadingApps] = useState(false);
+  const [copiedAppId, setCopiedAppId] = useState<string | null>(null);
+  const [promotingApp, setPromotingApp] = useState<string | null>(null);
 
-function TokenInputPanel({ onSaved }: TokenInputPanelProps) {
-  const [tokenValue, setTokenValue] = useState("");
-  const [saving, setSaving] = useState(false);
+  const loadDrivers = async () => {
+    setLoadingDrivers(true);
+    try {
+      const backend = await getBackend();
+      const result = await backend.getAllDrivers();
+      setDrivers(result);
+    } catch {
+      toast.error("Failed to load drivers.");
+    } finally {
+      setLoadingDrivers(false);
+    }
+  };
 
-  const handleSave = async () => {
-    const trimmed = tokenValue.trim();
-    if (!trimmed) {
-      toast.error("Please paste your admin token.");
+  const loadApplications = async () => {
+    setLoadingApps(true);
+    try {
+      const backend = await getBackend();
+      const result = await backend.getDriverApplications();
+      setApplications(result.sort((a, b) => Number(b.timestamp - a.timestamp)));
+    } catch {
+      toast.error("Failed to load driver applications.");
+    } finally {
+      setLoadingApps(false);
+    }
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadDrivers is stable
+  useEffect(() => {
+    loadDrivers();
+    loadApplications();
+  }, []);
+
+  const handleCopyAppPrincipal = async (principalText: string) => {
+    try {
+      await navigator.clipboard.writeText(principalText);
+      setCopiedAppId(principalText);
+      setTimeout(() => setCopiedAppId(null), 2000);
+    } catch {
+      toast.error("Failed to copy.");
+    }
+  };
+
+  const handlePromoteFromApp = async (principalText: string) => {
+    setPromotingApp(principalText);
+    try {
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const principal = Principal.fromText(principalText);
+      const backend = await getBackend();
+      await backend.promoteToDriver(principal);
+      toast.success("Driver promoted!");
+      await Promise.all([loadDrivers(), loadApplications()]);
+    } catch {
+      toast.error("Failed to promote. Check the principal ID.");
+    } finally {
+      setPromotingApp(null);
+    }
+  };
+
+  const handlePromote = async () => {
+    if (!principalInput.trim()) {
+      toast.error("Enter a principal ID.");
       return;
     }
-    setSaving(true);
+    setPromoting(true);
     try {
-      localStorage.setItem(ADMIN_TOKEN_KEY, trimmed);
-      // Reset backend so the token is picked up on next call
-      setBackendIdentity(undefined);
-      toast.success("Admin token saved. Retrying...");
-      setTokenValue("");
-      onSaved();
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const principal = Principal.fromText(principalInput.trim());
+      const backend = await getBackend();
+      await backend.promoteToDriver(principal);
+      toast.success("User promoted to driver!");
+      setPrincipalInput("");
+      await loadDrivers();
+    } catch {
+      toast.error("Failed to promote. Check the principal ID.");
     } finally {
-      setSaving(false);
+      setPromoting(false);
+    }
+  };
+
+  const handleDemote = async (principalText: string) => {
+    setDemoting(principalText);
+    try {
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const principal = Principal.fromText(principalText);
+      const backend = await getBackend();
+      await backend.demoteDriver(principal);
+      toast.success("Driver demoted.");
+      await loadDrivers();
+    } catch {
+      toast.error("Failed to demote driver.");
+    } finally {
+      setDemoting(null);
     }
   };
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Paste the token from your admin share link (the part after{" "}
-        <code className="bg-secondary px-1 rounded">?token=</code>).
-      </p>
-      <div className="flex gap-2">
-        <Input
-          type="text"
-          value={tokenValue}
-          onChange={(e) => setTokenValue(e.target.value)}
-          placeholder="Paste token here..."
-          className="font-mono text-xs focus-visible:ring-primary"
-          data-ocid="admin.token.input"
-        />
-        <Button
-          onClick={handleSave}
-          disabled={saving}
-          size="sm"
-          className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 gap-1.5"
-          data-ocid="admin.token.save_button"
-        >
-          {saving ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Save className="w-3.5 h-3.5" />
-          )}
-          Save
-        </Button>
+    <div className="space-y-6 max-w-lg">
+      {/* Driver Applications */}
+      <div className="bg-card rounded-2xl shadow-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-display font-bold text-lg flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-primary" />
+            Driver Applications
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={loadApplications}
+            disabled={loadingApps}
+            className="gap-2"
+            data-ocid="admin.applications.secondary_button"
+          >
+            {loadingApps ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
+        {loadingApps ? (
+          <div
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+            data-ocid="admin.applications.loading_state"
+          >
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading applications...
+          </div>
+        ) : applications.length === 0 ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-ocid="admin.applications.empty_state"
+          >
+            No driver applications yet.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {applications.map((app, i) => {
+              const pText = app.applicantPrincipal.toText();
+              return (
+                <div
+                  key={app.id.toString()}
+                  className="bg-secondary/40 border border-border rounded-xl p-4 space-y-2"
+                  data-ocid={`admin.applications.item.${i + 1}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-foreground truncate flex-1 bg-background/60 rounded px-2 py-1 border border-border">
+                      {pText}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyAppPrincipal(pText)}
+                      className="shrink-0 text-muted-foreground hover:text-accent-color transition-colors p-1"
+                      title="Copy principal"
+                      data-ocid={`admin.applications.toggle.${i + 1}`}
+                    >
+                      {copiedAppId === pText ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </button>
+                    <Button
+                      size="sm"
+                      onClick={() => handlePromoteFromApp(pText)}
+                      disabled={promotingApp === pText}
+                      className="gap-1.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shrink-0"
+                      data-ocid={`admin.applications.primary_button.${i + 1}`}
+                    >
+                      {promotingApp === pText ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Truck className="w-3.5 h-3.5" />
+                      )}
+                      {promotingApp === pText ? "Promoting..." : "Promote"}
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {app.message}
+                  </p>
+                  <p className="text-xs text-muted-foreground/60">
+                    Applied{" "}
+                    {new Date(
+                      Number(app.timestamp / BigInt(1_000_000)),
+                    ).toLocaleString()}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Promote */}
+      <div className="bg-card rounded-2xl shadow-card p-6">
+        <h2 className="font-display font-bold text-lg flex items-center gap-2 mb-2">
+          <Truck className="w-5 h-5 text-primary" />
+          Promote to Driver
+        </h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Users must sign in with Internet Identity first. Their principal ID
+          appears in their profile.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            value={principalInput}
+            onChange={(e) => setPrincipalInput(e.target.value)}
+            placeholder="aaaaa-aa (principal ID)"
+            className="font-mono text-sm flex-1"
+            data-ocid="admin.drivers.input"
+          />
+          <Button
+            onClick={handlePromote}
+            disabled={promoting}
+            className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 shrink-0"
+            data-ocid="admin.drivers.primary_button"
+          >
+            {promoting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Truck className="w-4 h-4" />
+            )}
+            {promoting ? "Promoting..." : "Promote"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Active Drivers */}
+      <div className="bg-card rounded-2xl shadow-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-display font-bold text-lg flex items-center gap-2">
+            <Users className="w-5 h-5 text-primary" />
+            Active Drivers
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={loadDrivers}
+            disabled={loadingDrivers}
+            className="gap-2"
+            data-ocid="admin.drivers.secondary_button"
+          >
+            {loadingDrivers ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
+
+        {loadingDrivers ? (
+          <div
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+            data-ocid="admin.drivers.loading_state"
+          >
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading drivers...
+          </div>
+        ) : drivers.length === 0 ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-ocid="admin.drivers.empty_state"
+          >
+            No drivers yet. Promote a user above.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {drivers.map((d, i) => {
+              const pText = d.toText();
+              return (
+                <div
+                  key={pText}
+                  className="flex items-center justify-between gap-2 bg-secondary/50 rounded-xl px-3 py-2"
+                  data-ocid={`admin.drivers.item.${i + 1}`}
+                >
+                  <span className="font-mono text-xs text-foreground truncate flex-1">
+                    {pText}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDemote(pText)}
+                    disabled={demoting === pText}
+                    className="gap-1.5 text-xs border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
+                    data-ocid="admin.drivers.delete_button"
+                  >
+                    {demoting === pText ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : null}
+                    {demoting === pText ? "Demoting..." : "Demote"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -308,15 +564,6 @@ export default function AdminPage() {
   const { login, loginStatus, identity, clear } = useInternetIdentity();
   const isAuthenticated = !!identity;
 
-  // Token section on login screen
-  const [hasToken, setHasToken] = useState(
-    () => !!localStorage.getItem(ADMIN_TOKEN_KEY),
-  );
-  const [tokenSectionOpen, setTokenSectionOpen] = useState(false);
-
-  // Inline token fix when Unauthorized error occurs
-  const [showInlineToken, setShowInlineToken] = useState(false);
-
   const [targetPrincipal, setTargetPrincipal] = useState("");
   const [targetRole, setTargetRole] = useState<UserRole>(UserRole.user);
   const [assigningRole, setAssigningRole] = useState(false);
@@ -324,7 +571,6 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
-  const [isUnauthorizedError, setIsUnauthorizedError] = useState(false);
   const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
   const [quotingIds, setQuotingIds] = useState<Set<string>>(new Set());
   const [markingPaidIds, setMarkingPaidIds] = useState<Set<string>>(new Set());
@@ -335,15 +581,21 @@ export default function AdminPage() {
 
   const loadOrders = useCallback(async () => {
     if (!identity) return;
-    setBackendIdentity(identity);
     setLoadingOrders(true);
     setOrdersError(null);
-    setIsUnauthorizedError(false);
-    setShowInlineToken(false);
     try {
+      setBackendIdentity(identity);
       const backend = await getBackend();
+      const isAdmin = await backend.claimAdminIfFirst();
+      if (!isAdmin) {
+        setOrdersError(
+          "Access denied. This Internet Identity is not the registered admin.",
+        );
+        return;
+      }
       const all = await backend.getAllOrders();
       setOrders(all.sort((a, b) => Number(b.id - a.id)));
+
       const profileEntries = await Promise.all(
         all
           .filter((o) => o.customerPrincipal)
@@ -359,16 +611,8 @@ export default function AdminPage() {
           }),
       );
       setCustomerProfiles(Object.fromEntries(profileEntries));
-    } catch (err) {
-      console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      const unauthorized = msg.includes("Unauthorized");
-      setIsUnauthorizedError(unauthorized);
-      setOrdersError(
-        unauthorized
-          ? "Admin access not recognized. Please enter your admin token below."
-          : "Failed to load orders. Please refresh and try again.",
-      );
+    } catch {
+      setOrdersError("Failed to load orders. Please try again.");
     } finally {
       setLoadingOrders(false);
     }
@@ -477,7 +721,8 @@ export default function AdminPage() {
           </div>
           <h1 className="font-display text-xl font-bold mb-2">Admin Access</h1>
           <p className="text-muted-foreground text-sm mb-6">
-            Sign in with Internet Identity to access the admin dashboard.
+            Sign in with Internet Identity. If you&apos;re the first admin to
+            sign in, you&apos;ll be registered automatically.
           </p>
           <Button
             onClick={() => login()}
@@ -493,44 +738,6 @@ export default function AdminPage() {
               "Sign in to Admin"
             )}
           </Button>
-
-          {/* Token section — only shown when no token is already saved */}
-          {!hasToken && (
-            <div className="mt-5 text-left">
-              <button
-                type="button"
-                onClick={() => setTokenSectionOpen((v) => !v)}
-                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full"
-                data-ocid="admin.token.toggle"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                Have an admin token?
-                {tokenSectionOpen ? (
-                  <ChevronUp className="w-3.5 h-3.5 ml-auto" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 ml-auto" />
-                )}
-              </button>
-
-              {tokenSectionOpen && (
-                <div className="mt-3 p-4 bg-secondary/60 rounded-2xl">
-                  <TokenInputPanel
-                    onSaved={() => {
-                      setHasToken(true);
-                      setTokenSectionOpen(false);
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {hasToken && (
-            <p className="mt-4 text-xs text-muted-foreground flex items-center justify-center gap-1.5">
-              <KeyRound className="w-3.5 h-3.5 text-primary" />
-              Admin token saved
-            </p>
-          )}
         </div>
       </main>
     );
@@ -564,6 +771,9 @@ export default function AdminPage() {
             </TabsTrigger>
             <TabsTrigger value="roles" data-ocid="admin.roles.tab">
               Roles
+            </TabsTrigger>
+            <TabsTrigger value="drivers" data-ocid="admin.drivers.tab">
+              Drivers
             </TabsTrigger>
           </TabsList>
 
@@ -608,50 +818,16 @@ export default function AdminPage() {
                   <p className="text-sm text-destructive max-w-md">
                     {ordersError}
                   </p>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={loadOrders}
-                      className="gap-2"
-                      data-ocid="admin.orders.retry_button"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                      Try Again
-                    </Button>
-
-                    {isUnauthorizedError && !showInlineToken && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowInlineToken(true)}
-                        className="gap-2 text-primary hover:text-primary/80"
-                        data-ocid="admin.token.open_modal_button"
-                      >
-                        <KeyRound className="w-4 h-4" />
-                        Enter admin token
-                      </Button>
-                    )}
-                  </div>
-
-                  {isUnauthorizedError && showInlineToken && (
-                    <div
-                      className="mt-2 p-4 bg-secondary/60 rounded-2xl max-w-md"
-                      data-ocid="admin.token.panel"
-                    >
-                      <p className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
-                        <KeyRound className="w-3.5 h-3.5 text-primary" />
-                        Enter Admin Token
-                      </p>
-                      <TokenInputPanel
-                        onSaved={() => {
-                          setShowInlineToken(false);
-                          loadOrders();
-                        }}
-                      />
-                    </div>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadOrders}
+                    className="gap-2"
+                    data-ocid="admin.orders.retry_button"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Try Again
+                  </Button>
                 </div>
               ) : orders.length === 0 ? (
                 <div
@@ -909,6 +1085,11 @@ export default function AdminPage() {
                 )}
               </div>
             </div>
+          </TabsContent>
+
+          {/* Drivers */}
+          <TabsContent value="drivers">
+            <DriversTab />
           </TabsContent>
         </Tabs>
       </div>

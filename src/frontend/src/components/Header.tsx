@@ -8,7 +8,16 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Package, ShieldCheck, User, Zap } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Loader2,
+  Package,
+  ShieldCheck,
+  Truck,
+  User,
+  Zap,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
@@ -20,7 +29,7 @@ interface HeaderProps {
 }
 
 export default function Header({ onNavigate }: HeaderProps) {
-  const { isAdmin, userProfile, refreshProfile } = useApp();
+  const { isAdmin, isDriver, userProfile, refreshProfile } = useApp();
   const { login, clear, identity } = useInternetIdentity();
   const isAuthenticated = !!identity;
 
@@ -28,11 +37,24 @@ export default function Header({ onNavigate }: HeaderProps) {
   const [nameInput, setNameInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const principalId = identity?.getPrincipal().toText() ?? "";
 
   const handleOpenAccount = () => {
     setNameInput(userProfile?.name ?? "");
     setEmailInput(userProfile?.email ?? "");
     setAccountOpen(true);
+  };
+
+  const handleCopyPrincipal = async () => {
+    try {
+      await navigator.clipboard.writeText(principalId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Failed to copy.");
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -88,7 +110,20 @@ export default function Header({ onNavigate }: HeaderProps) {
             </Button>
           )}
 
-          {isAuthenticated && !isAdmin && (
+          {isDriver && !isAdmin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigate("driver")}
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+              data-ocid="header.driver.link"
+            >
+              <Truck className="w-4 h-4" />
+              Driver Dashboard
+            </Button>
+          )}
+
+          {isAuthenticated && !isAdmin && !isDriver && (
             <Button
               variant="ghost"
               size="sm"
@@ -149,6 +184,35 @@ export default function Header({ onNavigate }: HeaderProps) {
                       placeholder="your@email.com"
                     />
                   </div>
+
+                  {/* Principal ID section */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wider">
+                      Your Principal ID
+                    </Label>
+                    <div className="flex items-center gap-2 bg-secondary/50 rounded-lg px-3 py-2 border border-border">
+                      <span className="font-mono text-xs text-foreground truncate flex-1 select-all">
+                        {principalId}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopyPrincipal}
+                        className="shrink-0 text-muted-foreground hover:text-accent-color transition-colors p-0.5"
+                        title="Copy principal ID"
+                        data-ocid="header.account.toggle"
+                      >
+                        {copied ? (
+                          <Check className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Share this ID with the admin to become a driver.
+                    </p>
+                  </div>
+
                   <Button
                     onClick={handleSaveProfile}
                     disabled={saving}

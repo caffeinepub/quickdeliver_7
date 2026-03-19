@@ -1,5 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +18,7 @@ import {
   Package,
   Phone,
   Sparkles,
+  Truck,
   User,
   Zap,
 } from "lucide-react";
@@ -20,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Message } from "../backend.d";
 import { useApp } from "../context/AppContext";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend } from "../utils/backendSingleton";
 
 interface FormState {
@@ -127,11 +135,17 @@ function OrderMessages({ orderId }: { orderId: bigint }) {
 }
 
 export default function HomePage() {
-  const { userProfile } = useApp();
+  const { userProfile, isAdmin, isDriver } = useApp();
+  const { identity } = useInternetIdentity();
+  const isAuthenticated = !!identity;
   const [form, setForm] = useState<FormState>(INITIAL);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [lastOrderId, setLastOrderId] = useState<bigint | null>(null);
+  const [driverModalOpen, setDriverModalOpen] = useState(false);
+  const [driverMessage, setDriverMessage] = useState("");
+  const [submittingApp, setSubmittingApp] = useState(false);
+  const [appSubmitted, setAppSubmitted] = useState(false);
 
   // Pre-fill form from user profile
   useEffect(() => {
@@ -187,6 +201,24 @@ export default function HomePage() {
       toast.error("Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitDriverApp = async () => {
+    if (!driverMessage.trim()) {
+      toast.error("Please write a short message about why you want to drive.");
+      return;
+    }
+    setSubmittingApp(true);
+    try {
+      const backend = await getBackend();
+      await backend.submitDriverApplication(driverMessage.trim());
+      setAppSubmitted(true);
+      toast.success("Application submitted! We'll review it shortly.");
+    } catch {
+      toast.error("Failed to submit application. Please try again.");
+    } finally {
+      setSubmittingApp(false);
     }
   };
 
@@ -479,6 +511,107 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Driver CTA */}
+      {isAuthenticated && !isAdmin && !isDriver && (
+        <section className="py-16 px-4">
+          <div className="max-w-2xl mx-auto">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5 }}
+              className="bg-card border border-card-border rounded-2xl shadow-card-modern p-8 text-center relative overflow-hidden"
+            >
+              <span className="absolute top-4 right-5 font-display text-6xl font-bold text-accent-color/5 select-none">
+                <Truck className="w-24 h-24" />
+              </span>
+              <div className="w-12 h-12 rounded-xl bg-accent-color/10 flex items-center justify-center mx-auto mb-4">
+                <Truck className="w-6 h-6 text-accent-color" />
+              </div>
+              <h2 className="font-display text-2xl font-bold mb-2">
+                Drive with Brink
+              </h2>
+              <p className="text-muted-foreground text-sm mb-6 max-w-md mx-auto">
+                Earn money delivering for Brink in the Tacoma area. Apply below
+                and we&apos;ll review your application.
+              </p>
+              <Dialog
+                open={driverModalOpen}
+                onOpenChange={(open) => {
+                  setDriverModalOpen(open);
+                  if (!open) {
+                    setDriverMessage("");
+                    setAppSubmitted(false);
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setDriverModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-accent-color text-white font-semibold hover:bg-accent-color/90 transition-colors"
+                  data-ocid="driver.open_modal_button"
+                >
+                  <Truck className="w-4 h-4" />
+                  Become a Brink Driver
+                </button>
+                <DialogContent
+                  className="sm:max-w-md"
+                  data-ocid="driver.dialog"
+                >
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <Truck className="w-5 h-5 text-accent-color" />
+                      Driver Application
+                    </DialogTitle>
+                  </DialogHeader>
+                  {appSubmitted ? (
+                    <div
+                      className="text-center py-6"
+                      data-ocid="driver.success_state"
+                    >
+                      <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                      <h3 className="font-display font-bold text-lg mb-1">
+                        Application Sent!
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        We&apos;ll review your application and promote you to
+                        driver if approved. Check your account for updates.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 pt-2">
+                      <p className="text-sm text-muted-foreground">
+                        Tell us a bit about yourself and why you&apos;d like to
+                        drive for Brink.
+                      </p>
+                      <Textarea
+                        value={driverMessage}
+                        onChange={(e) => setDriverMessage(e.target.value)}
+                        placeholder="e.g. I have a reliable car, available evenings and weekends, and I know the Tacoma area well..."
+                        rows={4}
+                        className="resize-none focus-visible:ring-accent-color/50"
+                        data-ocid="driver.textarea"
+                      />
+                      <Button
+                        onClick={handleSubmitDriverApp}
+                        disabled={submittingApp}
+                        className="w-full bg-accent-color hover:bg-accent-color/90 text-white"
+                        data-ocid="driver.submit_button"
+                      >
+                        {submittingApp ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : null}
+                        {submittingApp ? "Submitting..." : "Submit Application"}
+                      </Button>
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
+            </motion.div>
+          </div>
+        </section>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-border py-8 px-4 text-center">

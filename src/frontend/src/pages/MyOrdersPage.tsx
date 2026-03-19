@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ChevronDown,
   ChevronUp,
@@ -8,9 +9,12 @@ import {
   MapPin,
   MessageCircle,
   Package,
+  Send,
   Tag,
+  Truck,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { DeliveryStatus } from "../backend";
 import type { Message, Order } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
@@ -29,15 +33,31 @@ function statusBadge(status: DeliveryStatus) {
     );
   if (status === DeliveryStatus.paid)
     return <Badge className="bg-green-100 text-green-800 border-0">Paid</Badge>;
+  if (status === DeliveryStatus.assigned)
+    return (
+      <Badge className="bg-blue-100 text-blue-800 border-0">
+        Driver Assigned
+      </Badge>
+    );
+  if (status === DeliveryStatus.delivering)
+    return (
+      <Badge className="bg-amber-200 text-amber-900 border-0">
+        Out for Delivery
+      </Badge>
+    );
+  if (status === DeliveryStatus.completed)
+    return (
+      <Badge className="bg-green-200 text-green-900 border-0">Delivered</Badge>
+    );
   return null;
 }
 
-interface MessagesDrawerProps {
+interface AdminMessagesDrawerProps {
   orderId: bigint;
   open: boolean;
 }
 
-function MessagesDrawer({ orderId, open }: MessagesDrawerProps) {
+function AdminMessagesDrawer({ orderId, open }: AdminMessagesDrawerProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
@@ -106,6 +126,130 @@ function MessagesDrawer({ orderId, open }: MessagesDrawerProps) {
   );
 }
 
+interface DriverChatDrawerProps {
+  orderId: bigint;
+  open: boolean;
+}
+
+function DriverChatDrawer({ orderId, open }: DriverChatDrawerProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
+  const [msgText, setMsgText] = useState("");
+  const [sending, setSending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const b = await getBackend();
+      const msgs = await b.getDriverMessages(orderId);
+      setMessages(msgs.sort((a, b) => Number(a.timestamp - b.timestamp)));
+    } catch {
+      // silent
+    }
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!open || fetched) return;
+    setLoading(true);
+    fetchMessages().finally(() => {
+      setLoading(false);
+      setFetched(true);
+    });
+  }, [open, fetched, fetchMessages]);
+
+  const handleSend = async () => {
+    if (!msgText.trim()) return;
+    setSending(true);
+    try {
+      const b = await getBackend();
+      await b.sendDriverMessage(orderId, msgText.trim(), null);
+      setMsgText("");
+      toast.success("Message sent to driver");
+      await fetchMessages();
+    } catch {
+      toast.error("Failed to send message.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="mt-3 border-t border-border pt-3 space-y-3"
+      data-ocid="myorders.driverchat.panel"
+    >
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+        <Truck className="w-3.5 h-3.5" />
+        Driver Chat
+      </h4>
+      {loading ? (
+        <div
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          data-ocid="myorders.driverchat.loading_state"
+        >
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Loading...
+        </div>
+      ) : messages.length === 0 ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-ocid="myorders.driverchat.empty_state"
+        >
+          No messages with your driver yet.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {messages.map((msg, i) => (
+            <div
+              key={msg.id.toString()}
+              className="bg-blue-50 dark:bg-blue-950/30 rounded-xl p-3 text-sm"
+              data-ocid={`myorders.driverchat.item.${i + 1}`}
+            >
+              <p className="text-foreground leading-relaxed">{msg.text}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {formatDate(msg.timestamp)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Textarea
+          ref={textareaRef}
+          value={msgText}
+          onChange={(e) => setMsgText(e.target.value)}
+          placeholder="Message your driver..."
+          rows={2}
+          className="resize-none text-sm flex-1"
+          data-ocid="myorders.driverchat.textarea"
+        />
+        <Button
+          size="sm"
+          onClick={handleSend}
+          disabled={sending || !msgText.trim()}
+          className="bg-accent-color hover:bg-accent-color/90 text-white self-end"
+          data-ocid="myorders.driverchat.submit_button"
+        >
+          {sending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const DRIVER_STATUSES = new Set([
+  DeliveryStatus.assigned,
+  DeliveryStatus.delivering,
+  DeliveryStatus.completed,
+]);
+
 interface MyOrdersPageProps {
   onNavigate: (page: string) => void;
 }
@@ -118,6 +262,9 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedMsgs, setExpandedMsgs] = useState<Set<string>>(new Set());
+  const [expandedDriverChat, setExpandedDriverChat] = useState<Set<string>>(
+    new Set(),
+  );
 
   const loadOrders = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -141,6 +288,15 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
 
   const toggleMessages = (key: string) => {
     setExpandedMsgs((prev) => {
+      const s = new Set(prev);
+      if (s.has(key)) s.delete(key);
+      else s.add(key);
+      return s;
+    });
+  };
+
+  const toggleDriverChat = (key: string) => {
+    setExpandedDriverChat((prev) => {
       const s = new Set(prev);
       if (s.has(key)) s.delete(key);
       else s.add(key);
@@ -245,6 +401,8 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
             {orders.map((order, idx) => {
               const key = order.id.toString();
               const msgsOpen = expandedMsgs.has(key);
+              const driverChatOpen = expandedDriverChat.has(key);
+              const hasDriver = DRIVER_STATUSES.has(order.status);
               return (
                 <div
                   key={key}
@@ -318,7 +476,33 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
                     )}
                   </button>
 
-                  <MessagesDrawer orderId={order.id} open={msgsOpen} />
+                  <AdminMessagesDrawer orderId={order.id} open={msgsOpen} />
+
+                  {/* Driver chat for active deliveries */}
+                  {hasDriver && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => toggleDriverChat(key)}
+                        className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-500 transition-colors w-full"
+                        data-ocid="myorders.driverchat.open_modal_button"
+                      >
+                        <Truck className="w-4 h-4" />
+                        {driverChatOpen
+                          ? "Hide Driver Chat"
+                          : "Chat with Driver"}
+                        {driverChatOpen ? (
+                          <ChevronUp className="w-3.5 h-3.5 ml-auto" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5 ml-auto" />
+                        )}
+                      </button>
+                      <DriverChatDrawer
+                        orderId={order.id}
+                        open={driverChatOpen}
+                      />
+                    </>
+                  )}
                 </div>
               );
             })}

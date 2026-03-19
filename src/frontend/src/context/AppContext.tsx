@@ -14,6 +14,7 @@ export type { UserProfile };
 
 interface AppContextType {
   isAdmin: boolean;
+  isDriver: boolean;
   userProfile: UserProfile | null;
   refreshProfile: () => Promise<void>;
 }
@@ -23,6 +24,7 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const { identity } = useInternetIdentity();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isDriver, setIsDriver] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   const refreshProfile = useCallback(async () => {
@@ -38,27 +40,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setBackendIdentity(identity ?? undefined);
 
-    const checkAdmin = async () => {
+    const checkRoles = async () => {
       try {
         const b = await getBackend();
-        const admin = await b.isCallerAdmin();
+        const [admin, driver] = await Promise.all([
+          b.isCallerAdmin(),
+          b.isCallerDriver(),
+        ]);
         setIsAdmin(admin);
+        setIsDriver(driver);
       } catch {
         setIsAdmin(false);
+        setIsDriver(false);
       }
     };
 
     if (identity) {
-      checkAdmin();
+      checkRoles();
       refreshProfile();
     } else {
       setIsAdmin(false);
+      setIsDriver(false);
       setUserProfile(null);
     }
   }, [identity, refreshProfile]);
 
   return (
-    <AppContext.Provider value={{ isAdmin, userProfile, refreshProfile }}>
+    <AppContext.Provider
+      value={{ isAdmin, isDriver, userProfile, refreshProfile }}
+    >
       {children}
     </AppContext.Provider>
   );

@@ -10,9 +10,18 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
-export type DeliveryStatus = { 'pending' : null } |
+export type DeliveryStatus = { 'assigned' : null } |
+  { 'delivering' : null } |
+  { 'pending' : null } |
   { 'paid' : null } |
+  { 'completed' : null } |
   { 'quoted' : null };
+export interface DriverApplication {
+  'id' : bigint,
+  'applicantPrincipal' : Principal,
+  'message' : string,
+  'timestamp' : bigint,
+}
 export interface Message {
   'id' : bigint,
   'text' : string,
@@ -29,6 +38,7 @@ export interface Order {
   'description' : string,
   'address' : string,
   'quotedPrice' : [] | [bigint],
+  'driverPrincipal' : [] | [Principal],
 }
 export interface ShoppingItem {
   'productName' : string,
@@ -93,29 +103,43 @@ export interface _SERVICE {
   '_caffeineStorageUpdateGatewayPrincipals' : ActorMethod<[], undefined>,
   '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'claimAdminIfFirst' : ActorMethod<[], boolean>,
+  'claimOrder' : ActorMethod<[bigint], undefined>,
+  'completeOrder' : ActorMethod<[bigint], undefined>,
   'createCheckoutSession' : ActorMethod<
     [Array<ShoppingItem>, string, string],
     string
   >,
+  'demoteDriver' : ActorMethod<[Principal], undefined>,
+  'getAllDrivers' : ActorMethod<[], Array<Principal>>,
   'getAllOrders' : ActorMethod<[], Array<Order>>,
+  'getAvailableOrders' : ActorMethod<[], Array<Order>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getCustomerOrders' : ActorMethod<[], Array<Order>>,
+  'getDriverApplications' : ActorMethod<[], Array<DriverApplication>>,
+  'getDriverMessages' : ActorMethod<[bigint], Array<Message>>,
+  'getMyDriverOrders' : ActorMethod<[], Array<Order>>,
   'getOrder' : ActorMethod<[bigint], [] | [Order]>,
   'getOrderMessages' : ActorMethod<[bigint], Array<Message>>,
   'getStripeSessionStatus' : ActorMethod<[string], StripeSessionStatus>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
+  'isCallerDriver' : ActorMethod<[], boolean>,
   'isStripeConfigured' : ActorMethod<[], boolean>,
   'markOrderPaid' : ActorMethod<[bigint], undefined>,
+  'promoteToDriver' : ActorMethod<[Principal], undefined>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'sendDriverMessage' : ActorMethod<[bigint, string, [] | [string]], undefined>,
   'sendOrderMessage' : ActorMethod<[bigint, string, [] | [string]], undefined>,
   'setOrderPrice' : ActorMethod<[bigint, bigint], undefined>,
   'setStripeConfiguration' : ActorMethod<[StripeConfiguration], undefined>,
+  'startDelivery' : ActorMethod<[bigint], undefined>,
   'submitDeliveryRequest' : ActorMethod<
     [string, string, string, string],
     bigint
   >,
+  'submitDriverApplication' : ActorMethod<[string], bigint>,
   'transform' : ActorMethod<[TransformationInput], TransformationOutput>,
 }
 export declare const idlService: IDL.ServiceClass;
