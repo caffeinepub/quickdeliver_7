@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Footer from "./components/Footer";
 import Header from "./components/Header";
 import { AppProvider } from "./context/AppContext";
+import AboutPage from "./pages/AboutPage";
 import AdminPage from "./pages/AdminPage";
 import DriverDashboard from "./pages/DriverDashboard";
 import HomePage from "./pages/HomePage";
@@ -52,12 +53,14 @@ function getInitialPage(): Page {
   if (path === "/my-orders" || path.startsWith("/my-orders/"))
     return "my-orders";
   if (path === "/driver" || path.startsWith("/driver/")) return "driver";
+  if (path === "/about" || path.startsWith("/about/")) return "about";
   const params = new URLSearchParams(window.location.search);
   const p = params.get("page") as Page | null;
   if (p === "order-success") return "order-success";
   if (p === "admin") return "admin";
   if (p === "my-orders") return "my-orders";
   if (p === "driver") return "driver";
+  if (p === "about") return "about";
   return "home";
 }
 
@@ -72,6 +75,8 @@ function AppContent() {
         setPage("my-orders");
       else if (path === "/driver" || path.startsWith("/driver/"))
         setPage("driver");
+      else if (path === "/about" || path.startsWith("/about/"))
+        setPage("about");
       else setPage("home");
     };
     window.addEventListener("popstate", handlePopState);
@@ -92,6 +97,7 @@ function AppContent() {
         {page === "admin" && <AdminPage />}
         {page === "my-orders" && <MyOrdersPage onNavigate={navigate} />}
         {page === "driver" && <DriverDashboard />}
+        {page === "about" && <AboutPage onNavigate={navigate} />}
       </div>
       <Footer />
       <Toaster richColors position="top-right" />

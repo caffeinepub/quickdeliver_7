@@ -110,6 +110,7 @@ export interface _SERVICE {
     [Array<ShoppingItem>, string, string],
     string
   >,
+  'deleteOrder' : ActorMethod<[bigint], undefined>,
   'demoteDriver' : ActorMethod<[Principal], undefined>,
   'getAllDrivers' : ActorMethod<[], Array<Principal>>,
   'getAllOrders' : ActorMethod<[], Array<Order>>,

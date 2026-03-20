@@ -571,9 +571,11 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [isUnauthorized, setIsUnauthorized] = useState(false);
   const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
   const [quotingIds, setQuotingIds] = useState<Set<string>>(new Set());
   const [markingPaidIds, setMarkingPaidIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [expandedMsg, setExpandedMsg] = useState<Set<string>>(new Set());
   const [customerProfiles, setCustomerProfiles] = useState<
     Record<string, UserProfile | null>
@@ -583,19 +585,42 @@ export default function AdminPage() {
     if (!identity) return;
     setLoadingOrders(true);
     setOrdersError(null);
+    setIsUnauthorized(false);
     try {
+      // Ensure the backend singleton has the latest identity
       setBackendIdentity(identity);
       const backend = await getBackend();
-      const isAdmin = await backend.claimAdminIfFirst();
-      if (!isAdmin) {
+
+      // Try to claim/register as admin (no-op if already admin, returns true if caller is admin)
+      let adminConfirmed = false;
+      try {
+        adminConfirmed = await backend.claimAdminIfFirst();
+      } catch {
+        // claimAdminIfFirst might throw on some networks — fall back to isCallerAdmin
+        adminConfirmed = false;
+      }
+
+      if (!adminConfirmed) {
+        // Double-check using the read-only isCallerAdmin
+        try {
+          adminConfirmed = await backend.isCallerAdmin();
+        } catch {
+          adminConfirmed = false;
+        }
+      }
+
+      if (!adminConfirmed) {
+        setIsUnauthorized(true);
         setOrdersError(
-          "Access denied. This Internet Identity is not the registered admin.",
+          "This Internet Identity is not the registered admin. Sign in with the correct account.",
         );
         return;
       }
+
       const all = await backend.getAllOrders();
       setOrders(all.sort((a, b) => Number(b.id - a.id)));
 
+      // Load customer profiles in parallel
       const profileEntries = await Promise.all(
         all
           .filter((o) => o.customerPrincipal)
@@ -611,8 +636,19 @@ export default function AdminPage() {
           }),
       );
       setCustomerProfiles(Object.fromEntries(profileEntries));
-    } catch {
-      setOrdersError("Failed to load orders. Please try again.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        msg.toLowerCase().includes("unauthorized") ||
+        msg.toLowerCase().includes("not authorized")
+      ) {
+        setIsUnauthorized(true);
+        setOrdersError(
+          "Access denied. Sign in with your admin Internet Identity account.",
+        );
+      } else {
+        setOrdersError("Failed to load orders. Please refresh and try again.");
+      }
     } finally {
       setLoadingOrders(false);
     }
@@ -682,6 +718,28 @@ export default function AdminPage() {
       toast.error("Failed to mark order as paid.");
     } finally {
       setMarkingPaidIds((prev) => {
+        const s = new Set(prev);
+        s.delete(key);
+        return s;
+      });
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: bigint) => {
+    const key = orderId.toString();
+    if (!window.confirm("Delete this completed order? This cannot be undone."))
+      return;
+    setDeletingIds((prev) => new Set(prev).add(key));
+    try {
+      const backend = await getBackend();
+      await backend.deleteOrder(orderId);
+      toast.success(`Order #${key} deleted.`);
+      await loadOrders();
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete order.");
+    } finally {
+      setDeletingIds((prev) => {
         const s = new Set(prev);
         s.delete(key);
         return s;
@@ -815,19 +873,52 @@ export default function AdminPage() {
                   className="py-8 space-y-4"
                   data-ocid="admin.orders.error_state"
                 >
-                  <p className="text-sm text-destructive max-w-md">
-                    {ordersError}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={loadOrders}
-                    className="gap-2"
-                    data-ocid="admin.orders.retry_button"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    Try Again
-                  </Button>
+                  {isUnauthorized ? (
+                    <div className="flex items-start gap-3 bg-destructive/5 border border-destructive/20 rounded-xl p-4">
+                      <ShieldCheck className="w-5 h-5 text-destructive mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm text-destructive mb-1">
+                          Admin Access Not Recognized
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {ordersError}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Sign out and sign back in with your admin Internet
+                          Identity. On first sign-in, you&apos;ll be registered
+                          as admin automatically.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-destructive max-w-md">
+                      {ordersError}
+                    </p>
+                  )}
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadOrders}
+                      disabled={loadingOrders}
+                      className="gap-2"
+                      data-ocid="admin.orders.retry_button"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Try Again
+                    </Button>
+                    {isUnauthorized && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clear}
+                        className="gap-2 text-muted-foreground"
+                        data-ocid="admin.orders.secondary_button"
+                      >
+                        Sign Out & Switch Account
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ) : orders.length === 0 ? (
                 <div
@@ -980,6 +1071,26 @@ export default function AdminPage() {
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>Payment received. Order complete.</span>
+                          </div>
+                        )}
+
+                        {order.status === DeliveryStatus.completed && (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-blue-700 text-sm">
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Order delivered and completed.</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteOrder(order.id)}
+                              disabled={deletingIds.has(key)}
+                              className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
+                              data-ocid="admin.orders.delete_button"
+                            >
+                              {deletingIds.has(key)
+                                ? "Deleting..."
+                                : "Delete Order"}
+                            </button>
                           </div>
                         )}
 

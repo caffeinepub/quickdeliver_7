@@ -31,16 +31,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const b = await getBackend();
       const profile = await b.getCallerUserProfile();
-      setUserProfile(profile);
+      // profile is UserProfile | null — set directly, null means no profile saved yet
+      setUserProfile(profile ?? null);
     } catch {
+      // Don't throw — just leave existing profile state intact
       setUserProfile(null);
     }
   }, []);
 
   useEffect(() => {
+    // Always update the singleton identity first so all subsequent calls use it
     setBackendIdentity(identity ?? undefined);
 
-    const checkRoles = async () => {
+    if (!identity) {
+      setIsAdmin(false);
+      setIsDriver(false);
+      setUserProfile(null);
+      return;
+    }
+
+    const init = async () => {
       try {
         const b = await getBackend();
         const [admin, driver] = await Promise.all([
@@ -53,17 +63,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(false);
         setIsDriver(false);
       }
+
+      // Load profile after roles — profile may be null if never saved
+      try {
+        const b = await getBackend();
+        const profile = await b.getCallerUserProfile();
+        setUserProfile(profile ?? null);
+      } catch {
+        setUserProfile(null);
+      }
     };
 
-    if (identity) {
-      checkRoles();
-      refreshProfile();
-    } else {
-      setIsAdmin(false);
-      setIsDriver(false);
-      setUserProfile(null);
-    }
-  }, [identity, refreshProfile]);
+    init();
+  }, [identity]);
 
   return (
     <AppContext.Provider

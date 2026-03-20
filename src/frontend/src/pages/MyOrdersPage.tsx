@@ -9,6 +9,7 @@ import {
   MapPin,
   MessageCircle,
   Package,
+  RefreshCw,
   Send,
   Tag,
   Truck,
@@ -18,7 +19,7 @@ import { toast } from "sonner";
 import { DeliveryStatus } from "../backend";
 import type { Message, Order } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
-import { getBackend } from "../utils/backendSingleton";
+import { getBackend, setBackendIdentity } from "../utils/backendSingleton";
 
 function formatDate(ts: bigint): string {
   return new Date(Number(ts / BigInt(1_000_000))).toLocaleString();
@@ -267,10 +268,12 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
   );
 
   const loadOrders = useCallback(async () => {
-    if (!isAuthenticated) return;
+    if (!identity) return;
     setLoading(true);
     setError(null);
     try {
+      // Ensure the backend singleton uses the current identity
+      setBackendIdentity(identity);
       const backend = await getBackend();
       const result = await backend.getCustomerOrders();
       setOrders(result.sort((a, b) => Number(b.id - a.id)));
@@ -280,7 +283,7 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [identity]);
 
   useEffect(() => {
     loadOrders();
@@ -357,7 +360,22 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
       </div>
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-        {loading ? (
+        {/* Refresh button */}
+        <div className="flex justify-end mb-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadOrders}
+            disabled={loading}
+            className="gap-2"
+            data-ocid="myorders.secondary_button"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+
+        {loading && orders.length === 0 ? (
           <div className="py-16 text-center" data-ocid="myorders.loading_state">
             <Loader2 className="w-8 h-8 animate-spin text-accent-color mx-auto mb-3" />
             <p className="text-muted-foreground text-sm">
@@ -370,9 +388,11 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
             <Button
               variant="outline"
               onClick={loadOrders}
+              disabled={loading}
               className="gap-2"
-              data-ocid="myorders.secondary_button"
+              data-ocid="myorders.retry_button"
             >
+              <RefreshCw className="w-4 h-4" />
               Try Again
             </Button>
           </div>

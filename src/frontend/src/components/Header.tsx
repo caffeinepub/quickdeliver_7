@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   Check,
   Copy,
+  Info,
   Loader2,
   Package,
   ShieldCheck,
@@ -82,19 +83,31 @@ export default function Header({ onNavigate }: HeaderProps) {
   return (
     <header className="sticky top-0 z-50 bg-header-bg border-b border-header-border backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        <button
-          type="button"
-          onClick={() => onNavigate("home")}
-          className="flex items-center gap-2 group"
-          data-ocid="header.link"
-        >
-          <div className="w-8 h-8 rounded-lg bg-accent-color flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-            <Zap className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-display font-bold text-xl tracking-tight text-header-fg">
-            Brink
-          </span>
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => onNavigate("home")}
+            className="flex items-center gap-2 group"
+            data-ocid="header.link"
+          >
+            <div className="w-8 h-8 rounded-lg bg-accent-color flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
+              <Zap className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-display font-bold text-xl tracking-tight text-header-fg">
+              Brink
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate("about")}
+            className="hidden sm:flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            data-ocid="header.about.link"
+          >
+            <Info className="w-3.5 h-3.5" />
+            About
+          </button>
+        </div>
 
         <div className="flex items-center gap-2">
           {isAdmin && (

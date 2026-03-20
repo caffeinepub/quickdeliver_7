@@ -1,1 +1,7 @@
-export type Page = "home" | "order-success" | "admin" | "my-orders" | "driver";
+export type Page =
+  | "home"
+  | "order-success"
+  | "admin"
+  | "my-orders"
+  | "driver"
+  | "about";

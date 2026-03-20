@@ -95,6 +95,7 @@ export interface backendInterface {
     claimOrder(orderId: bigint): Promise<void>;
     completeOrder(orderId: bigint): Promise<void>;
     createCheckoutSession(items: Array<ShoppingItem>, successUrl: string, cancelUrl: string): Promise<string>;
+    deleteOrder(orderId: bigint): Promise<void>;
     demoteDriver(principal: Principal): Promise<void>;
     getAllDrivers(): Promise<Array<Principal>>;
     getAllOrders(): Promise<Array<Order>>;

@@ -2,13 +2,13 @@ import Stripe "stripe/stripe";
 import OutCall "http-outcalls/outcall";
 import Map "mo:core/Map";
 import List "mo:core/List";
-import Iter "mo:core/Iter";
 import Nat "mo:core/Nat";
+import Set "mo:core/Set";
+import Runtime "mo:core/Runtime";
+import Iter "mo:core/Iter";
+import Principal "mo:core/Principal";
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
-import Runtime "mo:core/Runtime";
-import Principal "mo:core/Principal";
-import Set "mo:core/Set";
 import MixinStorage "blob-storage/Mixin";
 
 actor {
@@ -18,11 +18,11 @@ actor {
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
 
-  // Persistent Stripe configuration
-  var stripeConfig : ?Stripe.StripeConfiguration = null;
+  // Stripe Config
+  stable var stripeConfig : ?Stripe.StripeConfiguration = null;
 
   // Stable admin principal -- persists across deployments/upgrades.
-  var _stableAdminPrincipal : ?Principal = null;
+  stable var _stableAdminPrincipal : ?Principal = null;
 
   public type DeliveryStatus = {
     #pending;
@@ -32,6 +32,7 @@ actor {
     #delivering;
     #completed;
   };
+
   public type Order = {
     id : Nat;
     customerName : Text;
@@ -64,18 +65,17 @@ actor {
     timestamp : Int;
   };
 
-  var nextOrderId = 1;
-  var nextMessageId = 1;
-  var nextDriverApplicationId = 1;
+  stable var nextOrderId = 1;
+  stable var nextMessageId = 1;
+  stable var nextDriverApplicationId = 1;
 
-  let orders = Map.empty<Nat, Order>();
-  let userProfiles = Map.empty<Principal, UserProfile>();
-  let orderMessages = Map.empty<Nat, List.List<Message>>();
-  let driverMessages = Map.empty<Nat, List.List<Message>>();
-  let drivers = Set.empty<Principal>();
-  let driverApplications = List.empty<DriverApplication>();
+  stable let orders = Map.empty<Nat, Order>();
+  stable let userProfiles = Map.empty<Principal, UserProfile>();
+  stable let orderMessages = Map.empty<Nat, List.List<Message>>();
+  stable let driverMessages = Map.empty<Nat, List.List<Message>>();
+  stable let drivers = Set.empty<Principal>();
+  stable let driverApplications = List.empty<DriverApplication>();
 
-  // Stripe integration methods
   public query func isStripeConfigured() : async Bool {
     stripeConfig != null;
   };
@@ -111,12 +111,10 @@ actor {
 
   func isAdminCaller(caller : Principal) : Bool {
     if (caller.isAnonymous()) { return false };
-    // Check stable storage first (survives upgrades)
     switch (_stableAdminPrincipal) {
       case (?p) { if (Principal.equal(p, caller)) { return true } };
       case (null) {};
     };
-    // Fallback to ACL (works within same deployment session)
     AccessControl.isAdmin(accessControlState, caller);
   };
 
@@ -289,7 +287,7 @@ actor {
       Runtime.trap("Unauthorized: Only authenticated users can view their orders");
     };
 
-    let filteredOrders = orders.filter(
+    let filteredOrdersIter = orders.filter(
       func(_id, order) {
         switch (order.customerPrincipal) {
           case (null) { false };
@@ -298,7 +296,7 @@ actor {
       }
     );
 
-    filteredOrders.values().toArray();
+    filteredOrdersIter.values().toArray();
   };
 
   public shared ({ caller }) func promoteToDriver(principal : Principal) : async () {
@@ -389,18 +387,34 @@ actor {
     };
   };
 
+  public shared ({ caller }) func deleteOrder(orderId : Nat) : async () {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can delete orders");
+    };
+
+    switch (orders.get(orderId)) {
+      case (null) { Runtime.trap("Order not found") };
+      case (?order) {
+        if (order.status != #completed) {
+          Runtime.trap("Can only delete completed orders");
+        };
+        ignore orders.remove(orderId);
+      };
+    };
+  };
+
   public query ({ caller }) func getAvailableOrders() : async [Order] {
     if (not drivers.contains(caller)) {
       Runtime.trap("Unauthorized: Only drivers can view available orders");
     };
 
-    let filteredOrders = orders.filter(
+    let filteredOrdersIter = orders.filter(
       func(_id, order) {
         order.driverPrincipal == null and order.status == #paid
       }
     );
 
-    filteredOrders.values().toArray();
+    filteredOrdersIter.values().toArray();
   };
 
   public query ({ caller }) func getMyDriverOrders() : async [Order] {
@@ -408,13 +422,13 @@ actor {
       Runtime.trap("Unauthorized: Only drivers can view their orders");
     };
 
-    let filteredOrders = orders.filter(
+    let filteredOrdersIter = orders.filter(
       func(_id, order) {
         order.driverPrincipal == ?caller
       }
     );
 
-    filteredOrders.values().toArray();
+    filteredOrdersIter.values().toArray();
   };
 
   public shared ({ caller }) func sendDriverMessage(orderId : Nat, text : Text, imageKey : ?Text) : async () {
@@ -482,7 +496,6 @@ actor {
     };
   };
 
-  // Driver application methods
   public shared ({ caller }) func submitDriverApplication(message : Text) : async Nat {
     if (caller.isAnonymous()) {
       Runtime.trap("Unauthorized: Must be logged in to submit driver applications");
