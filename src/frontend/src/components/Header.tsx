@@ -14,13 +14,15 @@ import {
   Download,
   Info,
   Loader2,
+  MessageCircle,
   Package,
+  Send,
   ShieldCheck,
   Truck,
   User,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
@@ -43,6 +45,14 @@ export default function Header({ onNavigate }: HeaderProps) {
   const [emailInput, setEmailInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [adminMessages, setAdminMessages] = useState<
+    Array<{ id: bigint; text: string; timestamp: bigint }>
+  >([]);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [msgInput, setMsgInput] = useState("");
+  const [sendingMsg, setSendingMsg] = useState(false);
+  const msgPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const msgBottomRef = useRef<HTMLDivElement>(null);
 
   const principalId = identity?.getPrincipal().toText() ?? "";
 
@@ -84,6 +94,52 @@ export default function Header({ onNavigate }: HeaderProps) {
     }
   };
 
+  const fetchAdminMessages = useCallback(async () => {
+    if (!identity) return;
+    try {
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const backend = await getBackend();
+      const myPrincipal = Principal.fromText(identity.getPrincipal().toText());
+      const msgs = await backend.getAdminDriverMessages(myPrincipal);
+      setAdminMessages(msgs.sort((a, b) => Number(a.timestamp - b.timestamp)));
+    } catch {
+      // silently ignore
+    }
+  }, [identity]);
+
+  useEffect(() => {
+    if (accountOpen && identity) {
+      setLoadingMsgs(true);
+      fetchAdminMessages().finally(() => setLoadingMsgs(false));
+      msgPollRef.current = setInterval(fetchAdminMessages, 8000);
+    } else {
+      if (msgPollRef.current) clearInterval(msgPollRef.current);
+    }
+    return () => {
+      if (msgPollRef.current) clearInterval(msgPollRef.current);
+    };
+  }, [accountOpen, identity, fetchAdminMessages]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message changes
+  useEffect(() => {
+    msgBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [adminMessages]);
+
+  const handleSendAdminMessage = async () => {
+    if (!msgInput.trim()) return;
+    setSendingMsg(true);
+    try {
+      const backend = await getBackend();
+      await backend.sendDriverToAdminMessage(msgInput.trim());
+      setMsgInput("");
+      await fetchAdminMessages();
+    } catch {
+      toast.error("Failed to send message.");
+    } finally {
+      setSendingMsg(false);
+    }
+  };
+
   return (
     <header className="sticky top-0 z-50 bg-header-bg border-b border-header-border backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -105,7 +161,7 @@ export default function Header({ onNavigate }: HeaderProps) {
           <button
             type="button"
             onClick={() => onNavigate("about")}
-            className="hidden sm:flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
             data-ocid="header.about.link"
           >
             <Info className="w-3.5 h-3.5" />
@@ -241,6 +297,85 @@ export default function Header({ onNavigate }: HeaderProps) {
                       Share this ID with the admin to become a driver.
                     </p>
                   </div>
+
+                  {/* Messages from Admin */}
+                  {identity && (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        Messages from Admin
+                      </Label>
+                      <div
+                        className="bg-secondary/40 border border-border rounded-lg overflow-hidden"
+                        data-ocid="header.account.panel"
+                      >
+                        <div className="max-h-[200px] overflow-y-auto p-3 space-y-2">
+                          {loadingMsgs ? (
+                            <div
+                              className="flex items-center gap-2 text-xs text-muted-foreground"
+                              data-ocid="header.account.loading_state"
+                            >
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Loading messages...
+                            </div>
+                          ) : adminMessages.length === 0 ? (
+                            <p
+                              className="text-xs text-muted-foreground"
+                              data-ocid="header.account.empty_state"
+                            >
+                              No messages yet. You can reach out to the admin
+                              here.
+                            </p>
+                          ) : (
+                            adminMessages.map((msg) => (
+                              <div
+                                key={msg.id.toString()}
+                                className="bg-background rounded-lg px-3 py-2"
+                              >
+                                <p className="text-sm text-foreground leading-relaxed">
+                                  {msg.text}
+                                </p>
+                                <p className="text-xs text-muted-foreground/60 mt-1">
+                                  {new Date(
+                                    Number(msg.timestamp / BigInt(1_000_000)),
+                                  ).toLocaleString()}
+                                </p>
+                              </div>
+                            ))
+                          )}
+                          <div ref={msgBottomRef} />
+                        </div>
+                        <div className="border-t border-border p-2 flex gap-2">
+                          <input
+                            type="text"
+                            value={msgInput}
+                            onChange={(e) => setMsgInput(e.target.value)}
+                            onKeyDown={(e) =>
+                              e.key === "Enter" &&
+                              !e.shiftKey &&
+                              handleSendAdminMessage()
+                            }
+                            placeholder="Message admin..."
+                            className="flex-1 text-sm bg-background border border-border rounded-md px-3 py-1.5 outline-none focus:ring-1 focus:ring-accent-color/50"
+                            data-ocid="header.account.input"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSendAdminMessage}
+                            disabled={sendingMsg || !msgInput.trim()}
+                            className="shrink-0 bg-accent-color hover:bg-accent-color/90 disabled:opacity-50 text-white rounded-md p-1.5 transition-colors"
+                            data-ocid="header.account.submit_button"
+                          >
+                            {sendingMsg ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Send className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <Button
                     onClick={handleSaveProfile}

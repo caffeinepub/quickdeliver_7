@@ -38,6 +38,10 @@ export interface http_request_result {
     body: Uint8Array;
     headers: Array<http_header>;
 }
+export interface DriverProfile {
+    principal: Principal;
+    profile?: UserProfile;
+}
 export interface ShoppingItem {
     productName: string;
     currency: string;
@@ -97,7 +101,9 @@ export interface backendInterface {
     createCheckoutSession(items: Array<ShoppingItem>, successUrl: string, cancelUrl: string): Promise<string>;
     deleteOrder(orderId: bigint): Promise<void>;
     demoteDriver(principal: Principal): Promise<void>;
+    getAdminDriverMessages(driverPrincipal: Principal): Promise<Array<Message>>;
     getAllDrivers(): Promise<Array<Principal>>;
+    getAllDriversWithProfiles(): Promise<Array<DriverProfile>>;
     getAllOrders(): Promise<Array<Order>>;
     getAvailableOrders(): Promise<Array<Order>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
@@ -116,7 +122,9 @@ export interface backendInterface {
     markOrderPaid(orderId: bigint): Promise<void>;
     promoteToDriver(principal: Principal): Promise<void>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    sendAdminDriverMessage(driverPrincipal: Principal, text: string): Promise<void>;
     sendDriverMessage(orderId: bigint, text: string, imageKey: string | null): Promise<void>;
+    sendDriverToAdminMessage(text: string): Promise<void>;
     sendOrderMessage(orderId: bigint, text: string, imageKey: string | null): Promise<void>;
     setOrderPrice(orderId: bigint, priceInCents: bigint): Promise<void>;
     setStripeConfiguration(config: StripeConfiguration): Promise<void>;

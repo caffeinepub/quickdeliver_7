@@ -31,6 +31,21 @@ export const ShoppingItem = IDL.Record({
   'priceInCents' : IDL.Nat,
   'productDescription' : IDL.Text,
 });
+export const Message = IDL.Record({
+  'id' : IDL.Nat,
+  'text' : IDL.Text,
+  'orderId' : IDL.Nat,
+  'imageKey' : IDL.Opt(IDL.Text),
+  'timestamp' : IDL.Int,
+});
+export const UserProfile = IDL.Record({
+  'name' : IDL.Text,
+  'email' : IDL.Text,
+});
+export const DriverProfile = IDL.Record({
+  'principal' : IDL.Principal,
+  'profile' : IDL.Opt(UserProfile),
+});
 export const DeliveryStatus = IDL.Variant({
   'assigned' : IDL.Null,
   'delivering' : IDL.Null,
@@ -50,21 +65,10 @@ export const Order = IDL.Record({
   'quotedPrice' : IDL.Opt(IDL.Nat),
   'driverPrincipal' : IDL.Opt(IDL.Principal),
 });
-export const UserProfile = IDL.Record({
-  'name' : IDL.Text,
-  'email' : IDL.Text,
-});
 export const DriverApplication = IDL.Record({
   'id' : IDL.Nat,
   'applicantPrincipal' : IDL.Principal,
   'message' : IDL.Text,
-  'timestamp' : IDL.Int,
-});
-export const Message = IDL.Record({
-  'id' : IDL.Nat,
-  'text' : IDL.Text,
-  'orderId' : IDL.Nat,
-  'imageKey' : IDL.Opt(IDL.Text),
   'timestamp' : IDL.Int,
 });
 export const StripeSessionStatus = IDL.Variant({
@@ -136,7 +140,17 @@ export const idlService = IDL.Service({
     ),
   'deleteOrder' : IDL.Func([IDL.Nat], [], []),
   'demoteDriver' : IDL.Func([IDL.Principal], [], []),
+  'getAdminDriverMessages' : IDL.Func(
+      [IDL.Principal],
+      [IDL.Vec(Message)],
+      ['query'],
+    ),
   'getAllDrivers' : IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
+  'getAllDriversWithProfiles' : IDL.Func(
+      [],
+      [IDL.Vec(DriverProfile)],
+      ['query'],
+    ),
   'getAllOrders' : IDL.Func([], [IDL.Vec(Order)], []),
   'getAvailableOrders' : IDL.Func([], [IDL.Vec(Order)], ['query']),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
@@ -159,11 +173,13 @@ export const idlService = IDL.Service({
   'markOrderPaid' : IDL.Func([IDL.Nat], [], []),
   'promoteToDriver' : IDL.Func([IDL.Principal], [], []),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'sendAdminDriverMessage' : IDL.Func([IDL.Principal, IDL.Text], [], []),
   'sendDriverMessage' : IDL.Func(
       [IDL.Nat, IDL.Text, IDL.Opt(IDL.Text)],
       [],
       [],
     ),
+  'sendDriverToAdminMessage' : IDL.Func([IDL.Text], [], []),
   'sendOrderMessage' : IDL.Func([IDL.Nat, IDL.Text, IDL.Opt(IDL.Text)], [], []),
   'setOrderPrice' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
   'setStripeConfiguration' : IDL.Func([StripeConfiguration], [], []),
@@ -207,6 +223,18 @@ export const idlFactory = ({ IDL }) => {
     'priceInCents' : IDL.Nat,
     'productDescription' : IDL.Text,
   });
+  const Message = IDL.Record({
+    'id' : IDL.Nat,
+    'text' : IDL.Text,
+    'orderId' : IDL.Nat,
+    'imageKey' : IDL.Opt(IDL.Text),
+    'timestamp' : IDL.Int,
+  });
+  const UserProfile = IDL.Record({ 'name' : IDL.Text, 'email' : IDL.Text });
+  const DriverProfile = IDL.Record({
+    'principal' : IDL.Principal,
+    'profile' : IDL.Opt(UserProfile),
+  });
   const DeliveryStatus = IDL.Variant({
     'assigned' : IDL.Null,
     'delivering' : IDL.Null,
@@ -226,18 +254,10 @@ export const idlFactory = ({ IDL }) => {
     'quotedPrice' : IDL.Opt(IDL.Nat),
     'driverPrincipal' : IDL.Opt(IDL.Principal),
   });
-  const UserProfile = IDL.Record({ 'name' : IDL.Text, 'email' : IDL.Text });
   const DriverApplication = IDL.Record({
     'id' : IDL.Nat,
     'applicantPrincipal' : IDL.Principal,
     'message' : IDL.Text,
-    'timestamp' : IDL.Int,
-  });
-  const Message = IDL.Record({
-    'id' : IDL.Nat,
-    'text' : IDL.Text,
-    'orderId' : IDL.Nat,
-    'imageKey' : IDL.Opt(IDL.Text),
     'timestamp' : IDL.Int,
   });
   const StripeSessionStatus = IDL.Variant({
@@ -306,7 +326,17 @@ export const idlFactory = ({ IDL }) => {
       ),
     'deleteOrder' : IDL.Func([IDL.Nat], [], []),
     'demoteDriver' : IDL.Func([IDL.Principal], [], []),
+    'getAdminDriverMessages' : IDL.Func(
+        [IDL.Principal],
+        [IDL.Vec(Message)],
+        ['query'],
+      ),
     'getAllDrivers' : IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
+    'getAllDriversWithProfiles' : IDL.Func(
+        [],
+        [IDL.Vec(DriverProfile)],
+        ['query'],
+      ),
     'getAllOrders' : IDL.Func([], [IDL.Vec(Order)], []),
     'getAvailableOrders' : IDL.Func([], [IDL.Vec(Order)], ['query']),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
@@ -329,11 +359,13 @@ export const idlFactory = ({ IDL }) => {
     'markOrderPaid' : IDL.Func([IDL.Nat], [], []),
     'promoteToDriver' : IDL.Func([IDL.Principal], [], []),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'sendAdminDriverMessage' : IDL.Func([IDL.Principal, IDL.Text], [], []),
     'sendDriverMessage' : IDL.Func(
         [IDL.Nat, IDL.Text, IDL.Opt(IDL.Text)],
         [],
         [],
       ),
+    'sendDriverToAdminMessage' : IDL.Func([IDL.Text], [], []),
     'sendOrderMessage' : IDL.Func(
         [IDL.Nat, IDL.Text, IDL.Opt(IDL.Text)],
         [],

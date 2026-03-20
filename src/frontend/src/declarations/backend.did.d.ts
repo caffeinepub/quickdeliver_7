@@ -22,6 +22,10 @@ export interface DriverApplication {
   'message' : string,
   'timestamp' : bigint,
 }
+export interface DriverProfile {
+  'principal' : Principal,
+  'profile' : [] | [UserProfile],
+}
 export interface Message {
   'id' : bigint,
   'text' : string,
@@ -112,7 +116,9 @@ export interface _SERVICE {
   >,
   'deleteOrder' : ActorMethod<[bigint], undefined>,
   'demoteDriver' : ActorMethod<[Principal], undefined>,
+  'getAdminDriverMessages' : ActorMethod<[Principal], Array<Message>>,
   'getAllDrivers' : ActorMethod<[], Array<Principal>>,
+  'getAllDriversWithProfiles' : ActorMethod<[], Array<DriverProfile>>,
   'getAllOrders' : ActorMethod<[], Array<Order>>,
   'getAvailableOrders' : ActorMethod<[], Array<Order>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
@@ -131,7 +137,9 @@ export interface _SERVICE {
   'markOrderPaid' : ActorMethod<[bigint], undefined>,
   'promoteToDriver' : ActorMethod<[Principal], undefined>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'sendAdminDriverMessage' : ActorMethod<[Principal, string], undefined>,
   'sendDriverMessage' : ActorMethod<[bigint, string, [] | [string]], undefined>,
+  'sendDriverToAdminMessage' : ActorMethod<[string], undefined>,
   'sendOrderMessage' : ActorMethod<[bigint, string, [] | [string]], undefined>,
   'setOrderPrice' : ActorMethod<[bigint, bigint], undefined>,
   'setStripeConfiguration' : ActorMethod<[StripeConfiguration], undefined>,

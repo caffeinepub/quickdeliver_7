@@ -10,6 +10,7 @@ import Principal "mo:core/Principal";
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
 import MixinStorage "blob-storage/Mixin";
+import Time "mo:core/Time";
 
 actor {
   include MixinStorage();
@@ -19,10 +20,10 @@ actor {
   include MixinAuthorization(accessControlState);
 
   // Stripe Config
-  stable var stripeConfig : ?Stripe.StripeConfiguration = null;
+  var stripeConfig : ?Stripe.StripeConfiguration = null;
 
   // Stable admin principal -- persists across deployments/upgrades.
-  stable var _stableAdminPrincipal : ?Principal = null;
+  var _stableAdminPrincipal : ?Principal = null;
 
   public type DeliveryStatus = {
     #pending;
@@ -65,16 +66,17 @@ actor {
     timestamp : Int;
   };
 
-  stable var nextOrderId = 1;
-  stable var nextMessageId = 1;
-  stable var nextDriverApplicationId = 1;
+  var nextOrderId = 1;
+  var nextMessageId = 1;
+  var nextDriverApplicationId = 1;
 
-  stable let orders = Map.empty<Nat, Order>();
-  stable let userProfiles = Map.empty<Principal, UserProfile>();
-  stable let orderMessages = Map.empty<Nat, List.List<Message>>();
-  stable let driverMessages = Map.empty<Nat, List.List<Message>>();
-  stable let drivers = Set.empty<Principal>();
-  stable let driverApplications = List.empty<DriverApplication>();
+  let orders = Map.empty<Nat, Order>();
+  let userProfiles = Map.empty<Principal, UserProfile>();
+  let orderMessages = Map.empty<Nat, List.List<Message>>();
+  let driverMessages = Map.empty<Nat, List.List<Message>>();
+  let drivers = Set.empty<Principal>();
+  let driverApplications = List.empty<DriverApplication>();
+  let adminDriverMessages = Map.empty<Principal, List.List<Message>>();
 
   public query func isStripeConfigured() : async Bool {
     stripeConfig != null;
@@ -154,7 +156,7 @@ actor {
     customerName : Text,
     contactInfo : Text,
     address : Text,
-    description : Text
+    description : Text,
   ) : async Nat {
     let orderId = nextOrderId;
     nextOrderId += 1;
@@ -398,7 +400,7 @@ actor {
         if (order.status != #completed) {
           Runtime.trap("Can only delete completed orders");
         };
-        ignore orders.remove(orderId);
+        orders.remove(orderId);
       };
     };
   };
@@ -520,5 +522,85 @@ actor {
       Runtime.trap("Unauthorized: Only admins can view all driver applications");
     };
     driverApplications.toArray();
+  };
+
+  public type DriverProfile = {
+    principal : Principal;
+    profile : ?UserProfile;
+  };
+
+  public query ({ caller }) func getAllDriversWithProfiles() : async [DriverProfile] {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can fetch driver profiles");
+    };
+
+    drivers.toArray().map<Principal, DriverProfile>(func(driverPrincipal) {
+      { principal = driverPrincipal; profile = userProfiles.get(driverPrincipal) };
+    });
+  };
+
+  public shared ({ caller }) func sendAdminDriverMessage(driverPrincipal : Principal, text : Text) : async () {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can send messages");
+    };
+    appendMessageToThread(driverPrincipal, /* isToDriver */ true, text);
+  };
+
+  public shared ({ caller }) func sendDriverToAdminMessage(text : Text) : async () {
+    if (not drivers.contains(caller)) {
+      Runtime.trap("Unauthorized: Only drivers can message admins");
+    };
+    appendMessageToThread(caller, /* isToDriver */ false, text);
+  };
+
+  // Any logged-in user (including applicants) can message the admin
+  public shared ({ caller }) func sendUserToAdminMessage(text : Text) : async () {
+    if (caller.isAnonymous()) {
+      Runtime.trap("Unauthorized: Must be logged in to send messages");
+    };
+    appendMessageToThread(caller, /* isToDriver */ false, text);
+  };
+
+  // Any logged-in user can read their own message thread with admin
+  public query ({ caller }) func getMyAdminMessages() : async [Message] {
+    if (caller.isAnonymous()) {
+      Runtime.trap("Unauthorized: Must be logged in to view messages");
+    };
+    switch (adminDriverMessages.get(caller)) {
+      case (null) { [] };
+      case (?messages) { messages.toArray() };
+    };
+  };
+
+  func appendMessageToThread(driverPrincipal : Principal, _isToDriver : Bool, text : Text) {
+    let message : Message = {
+      id = nextMessageId;
+      orderId = 0;
+      text;
+      imageKey = null;
+      timestamp = Time.now();
+    };
+
+    nextMessageId += 1;
+
+    let existingMessages = switch (adminDriverMessages.get(driverPrincipal)) {
+      case (null) { List.empty<Message>() };
+      case (?messages) { messages };
+    };
+
+    existingMessages.add(message);
+    adminDriverMessages.add(driverPrincipal, existingMessages);
+  };
+
+  public query ({ caller }) func getAdminDriverMessages(driverPrincipal : Principal) : async [Message] {
+    let isDriver = driverPrincipal == caller;
+    if (not isAdminCaller(caller) and not isDriver) {
+      Runtime.trap("Unauthorized: Only the driver or an admin can view these messages");
+    };
+
+    switch (adminDriverMessages.get(driverPrincipal)) {
+      case (null) { [] };
+      case (?messages) { messages.toArray() };
+    };
   };
 };

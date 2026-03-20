@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import { DeliveryStatus, UserRole } from "../backend";
 import type {
   DriverApplication,
+  DriverProfile,
   Message,
   Order,
   UserProfile,
@@ -247,9 +248,150 @@ function MessagePanel({ orderId }: MessagePanelProps) {
   );
 }
 
+function DriverChatPanelAdmin({
+  driverPrincipal,
+  driverName,
+  onClose,
+}: { driverPrincipal: string; driverName: string; onClose: () => void }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loadingMsgs, setLoadingMsgs] = useState(true);
+  const [msgText, setMsgText] = useState("");
+  const [sending, setSending] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const principal = Principal.fromText(driverPrincipal);
+      const backend = await getBackend();
+      const msgs = await backend.getAdminDriverMessages(principal);
+      setMessages(msgs.sort((a, b) => Number(a.timestamp - b.timestamp)));
+    } catch {
+      // ignore
+    }
+  }, [driverPrincipal]);
+
+  useEffect(() => {
+    fetchMessages().finally(() => setLoadingMsgs(false));
+    intervalRef.current = setInterval(fetchMessages, 5000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchMessages]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message changes
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!msgText.trim()) return;
+    setSending(true);
+    try {
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const principal = Principal.fromText(driverPrincipal);
+      const backend = await getBackend();
+      await backend.sendAdminDriverMessage(principal, msgText.trim());
+      setMsgText("");
+      await fetchMessages();
+    } catch {
+      toast.error("Failed to send message.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      className="mt-3 bg-background border border-border rounded-xl overflow-hidden"
+      data-ocid="admin.driver_chat.panel"
+    >
+      <div className="flex items-center justify-between px-4 py-2 bg-primary/10 border-b border-border">
+        <span className="text-sm font-semibold flex items-center gap-1.5">
+          <MessageCircle className="w-4 h-4 text-primary" />
+          Chat with {driverName}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground"
+          data-ocid="admin.driver_chat.close_button"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="h-48 overflow-y-auto p-3 space-y-2">
+        {loadingMsgs ? (
+          <div
+            className="flex justify-center items-center h-full"
+            data-ocid="admin.driver_chat.loading_state"
+          >
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : messages.length === 0 ? (
+          <p
+            className="text-xs text-muted-foreground text-center py-8"
+            data-ocid="admin.driver_chat.empty_state"
+          >
+            No messages yet. Start the conversation.
+          </p>
+        ) : (
+          messages.map((msg, i) => {
+            return (
+              <div
+                key={i.toString()}
+                className="flex justify-start"
+                data-ocid={`admin.driver_chat.item.${i + 1}`}
+              >
+                <div className="max-w-[80%] rounded-xl px-3 py-2 text-xs bg-secondary text-foreground">
+                  <p>{msg.text}</p>
+                  <p className="text-[10px] mt-0.5 text-muted-foreground">
+                    {formatDate(msg.timestamp)}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="flex gap-2 p-3 border-t border-border">
+        <input
+          type="text"
+          value={msgText}
+          onChange={(e) => setMsgText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Type a message..."
+          className="flex-1 bg-secondary/50 border border-border rounded-lg px-3 py-1.5 text-sm outline-none focus:border-primary"
+          data-ocid="admin.driver_chat.input"
+        />
+        <Button
+          size="sm"
+          onClick={handleSend}
+          disabled={sending || !msgText.trim()}
+          className="bg-primary hover:bg-primary/90"
+          data-ocid="admin.driver_chat.submit_button"
+        >
+          {sending ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Send className="w-3.5 h-3.5" />
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function DriversTab() {
   const [principalInput, setPrincipalInput] = useState("");
-  const [drivers, setDrivers] = useState<Principal[]>([]);
+  const [drivers, setDrivers] = useState<DriverProfile[]>([]);
   const [loadingDrivers, setLoadingDrivers] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [demoting, setDemoting] = useState<string | null>(null);
@@ -257,12 +399,14 @@ function DriversTab() {
   const [loadingApps, setLoadingApps] = useState(false);
   const [copiedAppId, setCopiedAppId] = useState<string | null>(null);
   const [promotingApp, setPromotingApp] = useState<string | null>(null);
+  const [openChat, setOpenChat] = useState<string | null>(null);
+  const [openAppChat, setOpenAppChat] = useState<string | null>(null);
 
   const loadDrivers = async () => {
     setLoadingDrivers(true);
     try {
       const backend = await getBackend();
-      const result = await backend.getAllDrivers();
+      const result = await backend.getAllDriversWithProfiles();
       setDrivers(result);
     } catch {
       toast.error("Failed to load drivers.");
@@ -434,6 +578,18 @@ function DriversTab() {
                       )}
                       {promotingApp === pText ? "Promoting..." : "Promote"}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setOpenAppChat(openAppChat === pText ? null : pText)
+                      }
+                      className="gap-1.5 text-xs shrink-0"
+                      data-ocid={`admin.applications.open_modal_button.${i + 1}`}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      Chat
+                    </Button>
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     {app.message}
@@ -444,6 +600,13 @@ function DriversTab() {
                       Number(app.timestamp / BigInt(1_000_000)),
                     ).toLocaleString()}
                   </p>
+                  {openAppChat === pText && (
+                    <DriverChatPanelAdmin
+                      driverPrincipal={pText}
+                      driverName="Applicant"
+                      onClose={() => setOpenAppChat(null)}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -527,29 +690,58 @@ function DriversTab() {
         ) : (
           <div className="space-y-2">
             {drivers.map((d, i) => {
-              const pText = d.toText();
+              const pText = d.principal.toText();
+              const shortId = `${pText.slice(0, 8)}...${pText.slice(-4)}`;
+              const displayName = d.profile?.name
+                ? `${d.profile.name} (${shortId})`
+                : shortId;
+              const isChatOpen = openChat === pText;
               return (
-                <div
-                  key={pText}
-                  className="flex items-center justify-between gap-2 bg-secondary/50 rounded-xl px-3 py-2"
-                  data-ocid={`admin.drivers.item.${i + 1}`}
-                >
-                  <span className="font-mono text-xs text-foreground truncate flex-1">
-                    {pText}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDemote(pText)}
-                    disabled={demoting === pText}
-                    className="gap-1.5 text-xs border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
-                    data-ocid="admin.drivers.delete_button"
-                  >
-                    {demoting === pText ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : null}
-                    {demoting === pText ? "Demoting..." : "Demote"}
-                  </Button>
+                <div key={pText} data-ocid={`admin.drivers.item.${i + 1}`}>
+                  <div className="flex items-center justify-between gap-2 bg-secondary/50 rounded-xl px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      {d.profile?.name && (
+                        <p className="text-sm font-semibold text-foreground truncate">
+                          {d.profile.name}
+                        </p>
+                      )}
+                      <span className="font-mono text-xs text-muted-foreground truncate block">
+                        {shortId}
+                      </span>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setOpenChat(isChatOpen ? null : pText)}
+                        className="gap-1.5 text-xs"
+                        data-ocid={`admin.drivers.open_modal_button.${i + 1}`}
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        {isChatOpen ? "Close" : "Chat"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDemote(pText)}
+                        disabled={demoting === pText}
+                        className="gap-1.5 text-xs border-destructive/30 text-destructive hover:bg-destructive/10"
+                        data-ocid="admin.drivers.delete_button"
+                      >
+                        {demoting === pText ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : null}
+                        {demoting === pText ? "Demoting..." : "Demote"}
+                      </Button>
+                    </div>
+                  </div>
+                  {isChatOpen && (
+                    <DriverChatPanelAdmin
+                      driverPrincipal={pText}
+                      driverName={displayName}
+                      onClose={() => setOpenChat(null)}
+                    />
+                  )}
                 </div>
               );
             })}

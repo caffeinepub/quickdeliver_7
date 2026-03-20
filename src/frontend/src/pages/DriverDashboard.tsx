@@ -12,6 +12,7 @@ import {
   Loader2,
   MapPin,
   MessageCircle,
+  MessageSquare,
   Navigation,
   Package,
   RefreshCw,
@@ -21,7 +22,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { DeliveryStatus } from "../backend";
+import { DeliveryStatus, UserRole } from "../backend";
 import type { Message, Order } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend } from "../utils/backendSingleton";
@@ -487,6 +488,138 @@ function MyDeliveryCard({ order, onUpdated }: MyDeliveryCardProps) {
   );
 }
 
+function AdminMessagesPanel({ identity }: { identity: any }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [msgText, setMsgText] = useState("");
+  const [sending, setSending] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const fetchMessages = useCallback(async () => {
+    if (!identity) return;
+    try {
+      const { Principal } = await import("@icp-sdk/core/principal");
+      const myPrincipal = Principal.fromText(
+        identity.getPrincipal().toString(),
+      );
+      const backend = await getBackend();
+      const msgs = await backend.getAdminDriverMessages(myPrincipal);
+      setMessages(msgs.sort((a, b) => Number(a.timestamp - b.timestamp)));
+    } catch {
+      // ignore
+    }
+  }, [identity]);
+
+  useEffect(() => {
+    fetchMessages().finally(() => setLoading(false));
+    intervalRef.current = setInterval(fetchMessages, 5000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchMessages]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message changes
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!msgText.trim()) return;
+    setSending(true);
+    try {
+      const backend = await getBackend();
+      await backend.sendDriverToAdminMessage(msgText.trim());
+      setMsgText("");
+      await fetchMessages();
+    } catch {
+      toast.error("Failed to send message.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      className="bg-card rounded-2xl shadow-card overflow-hidden"
+      data-ocid="driver.messages.panel"
+    >
+      <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+        <MessageSquare className="w-5 h-5 text-accent-color" />
+        <h2 className="font-display font-bold text-lg">Messages from Admin</h2>
+      </div>
+      <div className="h-80 overflow-y-auto p-4 space-y-3">
+        {loading ? (
+          <div
+            className="flex justify-center items-center h-full"
+            data-ocid="driver.messages.loading_state"
+          >
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center h-full gap-2"
+            data-ocid="driver.messages.empty_state"
+          >
+            <MessageSquare className="w-10 h-10 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">
+              No messages from admin yet.
+            </p>
+          </div>
+        ) : (
+          messages.map((msg, i) => {
+            return (
+              <div
+                key={i.toString()}
+                className="flex justify-start"
+                data-ocid={`driver.messages.item.${i + 1}`}
+              >
+                <div className="max-w-[80%] rounded-2xl px-4 py-2.5 text-sm bg-secondary text-foreground">
+                  <p>{msg.text}</p>
+                  <p className="text-[10px] mt-1 opacity-60">
+                    {new Date(
+                      Number(msg.timestamp / BigInt(1_000_000)),
+                    ).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="flex gap-2 p-4 border-t border-border">
+        <input
+          type="text"
+          value={msgText}
+          onChange={(e) => setMsgText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Message the admin..."
+          className="flex-1 bg-secondary/50 border border-border rounded-xl px-4 py-2 text-sm outline-none focus:border-accent-color"
+          data-ocid="driver.messages.input"
+        />
+        <Button
+          onClick={handleSend}
+          disabled={sending || !msgText.trim()}
+          className="bg-accent-color hover:bg-accent-color/90 text-white shrink-0"
+          data-ocid="driver.messages.submit_button"
+        >
+          {sending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function DriverDashboard() {
   const { login, loginStatus, identity } = useInternetIdentity();
   const isAuthenticated = !!identity;
@@ -652,6 +785,9 @@ export default function DriverDashboard() {
             <TabsTrigger value="mine" data-ocid="driver.mydeliveries.tab">
               My Deliveries
             </TabsTrigger>
+            <TabsTrigger value="messages" data-ocid="driver.messages.tab">
+              Admin Messages
+            </TabsTrigger>
           </TabsList>
 
           {/* Available Orders */}
@@ -809,6 +945,10 @@ export default function DriverDashboard() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="messages">
+            <AdminMessagesPanel identity={identity} />
           </TabsContent>
         </Tabs>
       </div>
