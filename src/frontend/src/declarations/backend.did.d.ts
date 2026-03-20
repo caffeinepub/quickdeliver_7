@@ -114,6 +114,7 @@ export interface _SERVICE {
     [Array<ShoppingItem>, string, string],
     string
   >,
+  'deleteDriverApplication' : ActorMethod<[bigint], undefined>,
   'deleteOrder' : ActorMethod<[bigint], undefined>,
   'demoteDriver' : ActorMethod<[Principal], undefined>,
   'getAdminDriverMessages' : ActorMethod<[Principal], Array<Message>>,

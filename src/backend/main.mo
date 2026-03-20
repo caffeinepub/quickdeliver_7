@@ -626,4 +626,13 @@ actor {
     };
     driverApplications.toArray();
   };
+
+  public shared ({ caller }) func deleteDriverApplication(id : Nat) : async () {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can delete driver applications");
+    };
+    let filtered = driverApplications.filter(func(app : DriverApplication) : Bool { app.id != id });
+    driverApplications.clear();
+    driverApplications.addAll(filtered.values());
+  };
 };

@@ -27,6 +27,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Trash2,
   Truck,
   Users,
   X,
@@ -401,6 +402,7 @@ function DriversTab() {
   const [loadingApps, setLoadingApps] = useState(false);
   const [copiedAppId, setCopiedAppId] = useState<string | null>(null);
   const [promotingApp, setPromotingApp] = useState<string | null>(null);
+  const [deletingApp, setDeletingApp] = useState<bigint | null>(null);
   const [openChat, setOpenChat] = useState<string | null>(null);
   const [openAppChat, setOpenAppChat] = useState<string | null>(null);
   const [appProfiles, setAppProfiles] = useState<
@@ -474,6 +476,20 @@ function DriversTab() {
       toast.error("Failed to promote. Check the principal ID.");
     } finally {
       setPromotingApp(null);
+    }
+  };
+
+  const handleDeleteApplication = async (id: bigint) => {
+    setDeletingApp(id);
+    try {
+      const backend = await getBackend();
+      await backend.deleteDriverApplication(id);
+      toast.success("Application deleted.");
+      await loadApplications();
+    } catch {
+      toast.error("Failed to delete application.");
+    } finally {
+      setDeletingApp(null);
     }
   };
 
@@ -620,6 +636,20 @@ function DriversTab() {
                           </span>
                         )}
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDeleteApplication(app.id)}
+                      disabled={deletingApp === app.id}
+                      className="gap-1.5 text-xs shrink-0 text-red-500 hover:text-red-600 hover:bg-red-50 border-red-200"
+                    >
+                      {deletingApp === app.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                      {deletingApp === app.id ? "Deleting..." : "Delete"}
+                    </Button>
                   </div>
                   {preferredName && (
                     <p className="text-sm font-medium text-foreground">

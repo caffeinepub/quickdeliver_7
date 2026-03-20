@@ -199,6 +199,7 @@ export interface backendInterface {
     claimOrder(orderId: bigint): Promise<void>;
     completeOrder(orderId: bigint): Promise<void>;
     createCheckoutSession(items: Array<ShoppingItem>, successUrl: string, cancelUrl: string): Promise<string>;
+    deleteDriverApplication(id: bigint): Promise<void>;
     deleteOrder(orderId: bigint): Promise<void>;
     demoteDriver(principal: Principal): Promise<void>;
     getAdminDriverMessages(driverPrincipal: Principal): Promise<Array<Message>>;
@@ -401,6 +402,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.createCheckoutSession(arg0, arg1, arg2);
+            return result;
+        }
+    }
+    async deleteDriverApplication(arg0: bigint): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteDriverApplication(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteDriverApplication(arg0);
             return result;
         }
     }
