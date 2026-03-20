@@ -8,16 +8,14 @@ import Runtime "mo:core/Runtime";
 import Iter "mo:core/Iter";
 import Principal "mo:core/Principal";
 import AccessControl "authorization/access-control";
-import MixinAuthorization "authorization/MixinAuthorization";
 import MixinStorage "blob-storage/Mixin";
 import Time "mo:core/Time";
 
 actor {
   include MixinStorage();
 
-  // Prefabricated AccessSystem instance
+  // Retained for upgrade compatibility (previously used by MixinAuthorization)
   let accessControlState = AccessControl.initState();
-  include MixinAuthorization(accessControlState);
 
   // Stripe Config
   var stripeConfig : ?Stripe.StripeConfiguration = null;
@@ -78,6 +76,46 @@ actor {
   let driverApplications = List.empty<DriverApplication>();
   let adminDriverMessages = Map.empty<Principal, List.List<Message>>();
 
+  // ─── Private helper ───────────────────────────────────────────────────────
+  func isAdminCaller(caller : Principal) : Bool {
+    if (caller.isAnonymous()) { return false };
+    switch (_stableAdminPrincipal) {
+      case (?p) { Principal.equal(p, caller) };
+      case (null) { false };
+    };
+  };
+
+  // ─── Admin registration ───────────────────────────────────────────────────
+  public shared ({ caller }) func claimAdminIfFirst() : async Bool {
+    if (_stableAdminPrincipal == null) {
+      _stableAdminPrincipal := ?caller;
+      return true;
+    } else if (?caller == _stableAdminPrincipal) {
+      return true;
+    } else {
+      return false;
+    };
+  };
+
+  // ─── Auth queries (replaces MixinAuthorization so we check _stableAdminPrincipal) ─
+  public query ({ caller }) func isCallerAdmin() : async Bool {
+    isAdminCaller(caller);
+  };
+
+  public query ({ caller }) func getCallerUserRole() : async AccessControl.UserRole {
+    if (isAdminCaller(caller)) { #admin }
+    else if (caller.isAnonymous()) { #guest }
+    else { #user };
+  };
+
+  public shared ({ caller }) func assignCallerUserRole(_user : Principal, _role : AccessControl.UserRole) : async () {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can assign roles");
+    };
+    // Role management is handled via the drivers Set and _stableAdminPrincipal
+  };
+
+  // ─── Stripe ───────────────────────────────────────────────────────────────
   public query func isStripeConfigured() : async Bool {
     stripeConfig != null;
   };
@@ -111,26 +149,7 @@ actor {
     OutCall.transform(input);
   };
 
-  func isAdminCaller(caller : Principal) : Bool {
-    if (caller.isAnonymous()) { return false };
-    switch (_stableAdminPrincipal) {
-      case (?p) { if (Principal.equal(p, caller)) { return true } };
-      case (null) {};
-    };
-    AccessControl.isAdmin(accessControlState, caller);
-  };
-
-  public shared ({ caller }) func claimAdminIfFirst() : async Bool {
-    if (_stableAdminPrincipal == null) {
-      _stableAdminPrincipal := ?caller;
-      return true;
-    } else if (?caller == _stableAdminPrincipal) {
-      return true;
-    } else {
-      return false;
-    };
-  };
-
+  // ─── User Profiles ────────────────────────────────────────────────────────
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     if (caller.isAnonymous()) {
       Runtime.trap("Unauthorized: Must be logged in to view profile");
@@ -152,6 +171,7 @@ actor {
     userProfiles.add(caller, profile);
   };
 
+  // ─── Orders ───────────────────────────────────────────────────────────────
   public shared ({ caller }) func submitDeliveryRequest(
     customerName : Text,
     contactInfo : Text,
@@ -204,7 +224,7 @@ actor {
     };
   };
 
-  public shared ({ caller }) func getAllOrders() : async [Order] {
+  public shared query ({ caller }) func getAllOrders() : async [Order] {
     if (not isAdminCaller(caller)) {
       Runtime.trap("Unauthorized: Only admins can fetch all orders");
     };
@@ -239,6 +259,40 @@ actor {
     };
   };
 
+  public shared ({ caller }) func deleteOrder(orderId : Nat) : async () {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can delete orders");
+    };
+
+    switch (orders.get(orderId)) {
+      case (null) { Runtime.trap("Order not found") };
+      case (?order) {
+        if (order.status != #completed) {
+          Runtime.trap("Can only delete completed orders");
+        };
+        orders.remove(orderId);
+      };
+    };
+  };
+
+  public query ({ caller }) func getCustomerOrders() : async [Order] {
+    if (caller.isAnonymous()) {
+      Runtime.trap("Unauthorized: Only authenticated users can view their orders");
+    };
+
+    let filteredOrdersIter = orders.filter(
+      func(_id, order) {
+        switch (order.customerPrincipal) {
+          case (null) { false };
+          case (?principal) { Principal.equal(caller, principal) };
+        };
+      }
+    );
+
+    filteredOrdersIter.values().toArray();
+  };
+
+  // ─── Messages ─────────────────────────────────────────────────────────────
   public shared ({ caller }) func sendOrderMessage(orderId : Nat, text : Text, imageKey : ?Text) : async () {
     if (not isAdminCaller(caller)) {
       Runtime.trap("Unauthorized: Only admins can send messages");
@@ -249,7 +303,7 @@ actor {
       orderId;
       text;
       imageKey;
-      timestamp = 0;
+      timestamp = Time.now();
     };
 
     nextMessageId += 1;
@@ -284,23 +338,138 @@ actor {
     };
   };
 
-  public query ({ caller }) func getCustomerOrders() : async [Order] {
-    if (caller.isAnonymous()) {
-      Runtime.trap("Unauthorized: Only authenticated users can view their orders");
+  public shared ({ caller }) func sendDriverMessage(orderId : Nat, text : Text, imageKey : ?Text) : async () {
+    switch (orders.get(orderId)) {
+      case (null) { Runtime.trap("Order not found") };
+      case (?order) {
+        let isDriver = switch (order.driverPrincipal) {
+          case (?driver) { driver == caller };
+          case (null) { false };
+        };
+
+        let isCustomer = switch (order.customerPrincipal) {
+          case (?customer) { customer == caller };
+          case (null) { false };
+        };
+
+        if (not isDriver and not isCustomer) {
+          Runtime.trap("Unauthorized: Only assigned driver or customer can send messages");
+        };
+      };
     };
 
-    let filteredOrdersIter = orders.filter(
-      func(_id, order) {
-        switch (order.customerPrincipal) {
-          case (null) { false };
-          case (?principal) { Principal.equal(caller, principal) };
-        };
-      }
-    );
+    let message : Message = {
+      id = nextMessageId;
+      orderId;
+      text;
+      imageKey;
+      timestamp = Time.now();
+    };
 
-    filteredOrdersIter.values().toArray();
+    nextMessageId += 1;
+
+    let existingMessages = switch (driverMessages.get(orderId)) {
+      case (null) { List.empty<Message>() };
+      case (?messages) { messages };
+    };
+
+    existingMessages.add(message);
+    driverMessages.add(orderId, existingMessages);
   };
 
+  public query ({ caller }) func getDriverMessages(orderId : Nat) : async [Message] {
+    switch (orders.get(orderId)) {
+      case (null) { Runtime.trap("Order not found") };
+      case (?order) {
+        let isDriver = switch (order.driverPrincipal) {
+          case (?driver) { driver == caller };
+          case (null) { false };
+        };
+
+        let isCustomer = switch (order.customerPrincipal) {
+          case (?customer) { customer == caller };
+          case (null) { false };
+        };
+
+        if (not isAdminCaller(caller) and not isDriver and not isCustomer) {
+          Runtime.trap("Unauthorized: Only assigned driver, customer, or admin can view messages");
+        };
+      };
+    };
+
+    switch (driverMessages.get(orderId)) {
+      case (null) { [] };
+      case (?messages) { messages.toArray() };
+    };
+  };
+
+  // ─── Admin-Driver messaging ───────────────────────────────────────────────
+  public shared ({ caller }) func sendAdminDriverMessage(driverPrincipal : Principal, text : Text) : async () {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can send messages");
+    };
+    appendMessageToThread(driverPrincipal, text);
+  };
+
+  public shared ({ caller }) func sendDriverToAdminMessage(text : Text) : async () {
+    if (not drivers.contains(caller)) {
+      Runtime.trap("Unauthorized: Only drivers can message admins");
+    };
+    appendMessageToThread(caller, text);
+  };
+
+  // Any logged-in user (including applicants) can message the admin
+  public shared ({ caller }) func sendUserToAdminMessage(text : Text) : async () {
+    if (caller.isAnonymous()) {
+      Runtime.trap("Unauthorized: Must be logged in to send messages");
+    };
+    appendMessageToThread(caller, text);
+  };
+
+  // Any logged-in user can read their own message thread with admin
+  public query ({ caller }) func getMyAdminMessages() : async [Message] {
+    if (caller.isAnonymous()) {
+      Runtime.trap("Unauthorized: Must be logged in to view messages");
+    };
+    switch (adminDriverMessages.get(caller)) {
+      case (null) { [] };
+      case (?messages) { messages.toArray() };
+    };
+  };
+
+  func appendMessageToThread(userPrincipal : Principal, text : Text) {
+    let message : Message = {
+      id = nextMessageId;
+      orderId = 0;
+      text;
+      imageKey = null;
+      timestamp = Time.now();
+    };
+
+    nextMessageId += 1;
+
+    let existingMessages = switch (adminDriverMessages.get(userPrincipal)) {
+      case (null) { List.empty<Message>() };
+      case (?messages) { messages };
+    };
+
+    existingMessages.add(message);
+    adminDriverMessages.add(userPrincipal, existingMessages);
+  };
+
+  public query ({ caller }) func getAdminDriverMessages(driverPrincipal : Principal) : async [Message] {
+    let isSelf = driverPrincipal == caller;
+    if (not isAdminCaller(caller) and not isSelf) {
+      Runtime.trap("Unauthorized: Only the driver or an admin can view these messages");
+    };
+
+    switch (adminDriverMessages.get(driverPrincipal)) {
+      case (null) { [] };
+      case (?messages) { messages.toArray() };
+    };
+  };
+
+  // ─── Drivers ──────────────────────────────────────────────────────────────
   public shared ({ caller }) func promoteToDriver(principal : Principal) : async () {
     if (not isAdminCaller(caller)) {
       Runtime.trap("Unauthorized: Only admins can promote drivers");
@@ -312,7 +481,6 @@ actor {
     if (not isAdminCaller(caller)) {
       Runtime.trap("Unauthorized: Only admins can demote a driver");
     };
-
     drivers.remove(principal);
   };
 
@@ -325,6 +493,34 @@ actor {
       Runtime.trap("Unauthorized: Only admins can view all drivers");
     };
     drivers.toArray();
+  };
+
+  public query ({ caller }) func getAvailableOrders() : async [Order] {
+    if (not drivers.contains(caller)) {
+      Runtime.trap("Unauthorized: Only drivers can view available orders");
+    };
+
+    let filteredOrdersIter = orders.filter(
+      func(_id, order) {
+        order.driverPrincipal == null and order.status == #paid
+      }
+    );
+
+    filteredOrdersIter.values().toArray();
+  };
+
+  public query ({ caller }) func getMyDriverOrders() : async [Order] {
+    if (not drivers.contains(caller)) {
+      Runtime.trap("Unauthorized: Only drivers can view their orders");
+    };
+
+    let filteredOrdersIter = orders.filter(
+      func(_id, order) {
+        order.driverPrincipal == ?caller
+      }
+    );
+
+    filteredOrdersIter.values().toArray();
   };
 
   public shared ({ caller }) func claimOrder(orderId : Nat) : async () {
@@ -389,141 +585,6 @@ actor {
     };
   };
 
-  public shared ({ caller }) func deleteOrder(orderId : Nat) : async () {
-    if (not isAdminCaller(caller)) {
-      Runtime.trap("Unauthorized: Only admins can delete orders");
-    };
-
-    switch (orders.get(orderId)) {
-      case (null) { Runtime.trap("Order not found") };
-      case (?order) {
-        if (order.status != #completed) {
-          Runtime.trap("Can only delete completed orders");
-        };
-        orders.remove(orderId);
-      };
-    };
-  };
-
-  public query ({ caller }) func getAvailableOrders() : async [Order] {
-    if (not drivers.contains(caller)) {
-      Runtime.trap("Unauthorized: Only drivers can view available orders");
-    };
-
-    let filteredOrdersIter = orders.filter(
-      func(_id, order) {
-        order.driverPrincipal == null and order.status == #paid
-      }
-    );
-
-    filteredOrdersIter.values().toArray();
-  };
-
-  public query ({ caller }) func getMyDriverOrders() : async [Order] {
-    if (not drivers.contains(caller)) {
-      Runtime.trap("Unauthorized: Only drivers can view their orders");
-    };
-
-    let filteredOrdersIter = orders.filter(
-      func(_id, order) {
-        order.driverPrincipal == ?caller
-      }
-    );
-
-    filteredOrdersIter.values().toArray();
-  };
-
-  public shared ({ caller }) func sendDriverMessage(orderId : Nat, text : Text, imageKey : ?Text) : async () {
-    switch (orders.get(orderId)) {
-      case (null) { Runtime.trap("Order not found") };
-      case (?order) {
-        let isDriver = switch (order.driverPrincipal) {
-          case (?driver) { driver == caller };
-          case (null) { false };
-        };
-
-        let isCustomer = switch (order.customerPrincipal) {
-          case (?customer) { customer == caller };
-          case (null) { false };
-        };
-
-        if (not isDriver and not isCustomer) {
-          Runtime.trap("Unauthorized: Only assigned driver or customer can send messages");
-        };
-      };
-    };
-
-    let message : Message = {
-      id = nextMessageId;
-      orderId;
-      text;
-      imageKey;
-      timestamp = 0;
-    };
-
-    nextMessageId += 1;
-
-    let existingMessages = switch (driverMessages.get(orderId)) {
-      case (null) { List.empty<Message>() };
-      case (?messages) { messages };
-    };
-
-    existingMessages.add(message);
-    driverMessages.add(orderId, existingMessages);
-  };
-
-  public query ({ caller }) func getDriverMessages(orderId : Nat) : async [Message] {
-    switch (orders.get(orderId)) {
-      case (null) { Runtime.trap("Order not found") };
-      case (?order) {
-        let isDriver = switch (order.driverPrincipal) {
-          case (?driver) { driver == caller };
-          case (null) { false };
-        };
-
-        let isCustomer = switch (order.customerPrincipal) {
-          case (?customer) { customer == caller };
-          case (null) { false };
-        };
-
-        if (not isAdminCaller(caller) and not isDriver and not isCustomer) {
-          Runtime.trap("Unauthorized: Only assigned driver, customer, or admin can view messages");
-        };
-      };
-    };
-
-    switch (driverMessages.get(orderId)) {
-      case (null) { [] };
-      case (?messages) { messages.toArray() };
-    };
-  };
-
-  public shared ({ caller }) func submitDriverApplication(message : Text) : async Nat {
-    if (caller.isAnonymous()) {
-      Runtime.trap("Unauthorized: Must be logged in to submit driver applications");
-    };
-
-    let id = nextDriverApplicationId;
-    nextDriverApplicationId += 1;
-
-    let application : DriverApplication = {
-      id;
-      applicantPrincipal = caller;
-      message;
-      timestamp = 0;
-    };
-
-    driverApplications.add(application);
-    id;
-  };
-
-  public shared ({ caller }) func getDriverApplications() : async [DriverApplication] {
-    if (not isAdminCaller(caller)) {
-      Runtime.trap("Unauthorized: Only admins can view all driver applications");
-    };
-    driverApplications.toArray();
-  };
-
   public type DriverProfile = {
     principal : Principal;
     profile : ?UserProfile;
@@ -539,68 +600,30 @@ actor {
     });
   };
 
-  public shared ({ caller }) func sendAdminDriverMessage(driverPrincipal : Principal, text : Text) : async () {
-    if (not isAdminCaller(caller)) {
-      Runtime.trap("Unauthorized: Only admins can send messages");
-    };
-    appendMessageToThread(driverPrincipal, /* isToDriver */ true, text);
-  };
-
-  public shared ({ caller }) func sendDriverToAdminMessage(text : Text) : async () {
-    if (not drivers.contains(caller)) {
-      Runtime.trap("Unauthorized: Only drivers can message admins");
-    };
-    appendMessageToThread(caller, /* isToDriver */ false, text);
-  };
-
-  // Any logged-in user (including applicants) can message the admin
-  public shared ({ caller }) func sendUserToAdminMessage(text : Text) : async () {
+  // ─── Driver Applications ──────────────────────────────────────────────────
+  public shared ({ caller }) func submitDriverApplication(message : Text) : async Nat {
     if (caller.isAnonymous()) {
-      Runtime.trap("Unauthorized: Must be logged in to send messages");
+      Runtime.trap("Unauthorized: Must be logged in to submit driver applications");
     };
-    appendMessageToThread(caller, /* isToDriver */ false, text);
-  };
 
-  // Any logged-in user can read their own message thread with admin
-  public query ({ caller }) func getMyAdminMessages() : async [Message] {
-    if (caller.isAnonymous()) {
-      Runtime.trap("Unauthorized: Must be logged in to view messages");
-    };
-    switch (adminDriverMessages.get(caller)) {
-      case (null) { [] };
-      case (?messages) { messages.toArray() };
-    };
-  };
+    let id = nextDriverApplicationId;
+    nextDriverApplicationId += 1;
 
-  func appendMessageToThread(driverPrincipal : Principal, _isToDriver : Bool, text : Text) {
-    let message : Message = {
-      id = nextMessageId;
-      orderId = 0;
-      text;
-      imageKey = null;
+    let application : DriverApplication = {
+      id;
+      applicantPrincipal = caller;
+      message;
       timestamp = Time.now();
     };
 
-    nextMessageId += 1;
-
-    let existingMessages = switch (adminDriverMessages.get(driverPrincipal)) {
-      case (null) { List.empty<Message>() };
-      case (?messages) { messages };
-    };
-
-    existingMessages.add(message);
-    adminDriverMessages.add(driverPrincipal, existingMessages);
+    driverApplications.add(application);
+    id;
   };
 
-  public query ({ caller }) func getAdminDriverMessages(driverPrincipal : Principal) : async [Message] {
-    let isDriver = driverPrincipal == caller;
-    if (not isAdminCaller(caller) and not isDriver) {
-      Runtime.trap("Unauthorized: Only the driver or an admin can view these messages");
+  public shared ({ caller }) func getDriverApplications() : async [DriverApplication] {
+    if (not isAdminCaller(caller)) {
+      Runtime.trap("Unauthorized: Only admins can view all driver applications");
     };
-
-    switch (adminDriverMessages.get(driverPrincipal)) {
-      case (null) { [] };
-      case (?messages) { messages.toArray() };
-    };
+    driverApplications.toArray();
   };
 };

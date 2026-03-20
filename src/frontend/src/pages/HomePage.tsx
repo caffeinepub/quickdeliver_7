@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Message } from "../backend.d";
 import { useApp } from "../context/AppContext";
+import { useBlobStorage } from "../hooks/useBlobStorage";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend } from "../utils/backendSingleton";
 
@@ -66,6 +67,7 @@ function formatDate(ts: bigint): string {
 }
 
 function OrderMessages({ orderId }: { orderId: bigint }) {
+  const { getBlobUrl } = useBlobStorage();
   const [messages, setMessages] = useState<Message[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -123,7 +125,7 @@ function OrderMessages({ orderId }: { orderId: bigint }) {
             </p>
             {msg.imageKey && (
               <img
-                src={`/api/blob/${msg.imageKey}`}
+                src={getBlobUrl(msg.imageKey as string)}
                 alt="Attachment from Brink"
                 className="mt-3 rounded-lg max-w-full max-h-56 object-contain border border-border"
               />

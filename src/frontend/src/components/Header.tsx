@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { useUnreadCounts } from "../hooks/useUnreadCounts";
 import { getBackend } from "../utils/backendSingleton";
 
 const APP_DOWNLOAD_URL =
@@ -37,6 +38,7 @@ interface HeaderProps {
 
 export default function Header({ onNavigate }: HeaderProps) {
   const { isAdmin, isDriver, userProfile, refreshProfile } = useApp();
+  const { adminUnread, driverUnread, customerUnread } = useUnreadCounts();
   const { login, clear, identity } = useInternetIdentity();
   const isAuthenticated = !!identity;
 
@@ -183,42 +185,63 @@ export default function Header({ onNavigate }: HeaderProps) {
           </a>
 
           {isAdmin && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onNavigate("admin")}
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-              data-ocid="header.admin.link"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              Admin
-            </Button>
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavigate("admin")}
+                className="gap-1.5 text-muted-foreground hover:text-foreground"
+                data-ocid="header.admin.link"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                Admin
+              </Button>
+              {adminUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none pointer-events-none">
+                  {adminUnread > 99 ? "99+" : adminUnread}
+                </span>
+              )}
+            </div>
           )}
 
           {isDriver && !isAdmin && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onNavigate("driver")}
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-              data-ocid="header.driver.link"
-            >
-              <Truck className="w-4 h-4" />
-              Driver Dashboard
-            </Button>
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavigate("driver")}
+                className="gap-1.5 text-muted-foreground hover:text-foreground"
+                data-ocid="header.driver.link"
+              >
+                <Truck className="w-4 h-4" />
+                Driver Dashboard
+              </Button>
+              {driverUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none pointer-events-none">
+                  {driverUnread > 99 ? "99+" : driverUnread}
+                </span>
+              )}
+            </div>
           )}
 
           {isAuthenticated && !isAdmin && !isDriver && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onNavigate("my-orders")}
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-              data-ocid="header.myorders.link"
-            >
-              <Package className="w-4 h-4" />
-              My Orders
-            </Button>
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onNavigate("my-orders")}
+                className="gap-1.5 text-muted-foreground hover:text-foreground"
+                data-ocid="header.myorders.link"
+              >
+                <Package className="w-4 h-4" />
+                My Orders
+              </Button>
+              {customerUnread > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none pointer-events-none">
+                  {customerUnread > 99 ? "99+" : customerUnread}
+                </span>
+              )}
+            </div>
           )}
 
           {isAuthenticated && (

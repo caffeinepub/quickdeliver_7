@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { DeliveryStatus, UserRole } from "../backend";
 import type { Message, Order } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { useUnreadCounts } from "../hooks/useUnreadCounts";
 import { getBackend } from "../utils/backendSingleton";
 
 function formatDate(ts: bigint): string {
@@ -346,9 +347,16 @@ function AvailableOrderCard({ order, onClaimed }: AvailableOrderCardProps) {
 interface MyDeliveryCardProps {
   order: Order;
   onUpdated: () => void;
+  getUnread: (key: string) => number;
+  markRead: (key: string) => void;
 }
 
-function MyDeliveryCard({ order, onUpdated }: MyDeliveryCardProps) {
+function MyDeliveryCard({
+  order,
+  onUpdated,
+  getUnread,
+  markRead,
+}: MyDeliveryCardProps) {
   const [acting, setActing] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(order.address)}`;
@@ -468,12 +476,22 @@ function MyDeliveryCard({ order, onUpdated }: MyDeliveryCardProps) {
 
       <button
         type="button"
-        onClick={() => setChatOpen((v) => !v)}
+        onClick={() => {
+          if (!chatOpen) markRead(`order_driver_${order.id.toString()}`);
+          setChatOpen((v) => !v);
+        }}
         className="flex items-center gap-2 text-sm font-medium text-accent-color hover:text-accent-color/80 transition-colors pt-1 border-t border-border w-full mt-1"
         data-ocid="driver.mydeliveries.open_modal_button"
       >
         <MessageCircle className="w-4 h-4" />
         {chatOpen ? "Hide Chat" : "Chat with Customer"}
+        {!chatOpen && getUnread(`order_driver_${order.id.toString()}`) > 0 && (
+          <span className="ml-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+            {getUnread(`order_driver_${order.id.toString()}`) > 99
+              ? "99+"
+              : getUnread(`order_driver_${order.id.toString()}`)}
+          </span>
+        )}
         {chatOpen ? (
           <ChevronUp className="w-3.5 h-3.5 ml-auto" />
         ) : (
@@ -622,6 +640,11 @@ function AdminMessagesPanel({ identity }: { identity: any }) {
 
 export default function DriverDashboard() {
   const { login, loginStatus, identity } = useInternetIdentity();
+  const {
+    getUnread,
+    markRead,
+    driverUnread: _driverUnread,
+  } = useUnreadCounts();
   const isAuthenticated = !!identity;
 
   const [availableOrders, setAvailableOrders] = useState<Order[]>([]);
@@ -785,8 +808,31 @@ export default function DriverDashboard() {
             <TabsTrigger value="mine" data-ocid="driver.mydeliveries.tab">
               My Deliveries
             </TabsTrigger>
-            <TabsTrigger value="messages" data-ocid="driver.messages.tab">
-              Admin Messages
+            <TabsTrigger
+              value="messages"
+              data-ocid="driver.messages.tab"
+              onClick={() => {
+                if (identity)
+                  markRead(`admin_driver_${identity.getPrincipal().toText()}`);
+              }}
+            >
+              <span className="relative inline-flex items-center gap-1.5">
+                Admin Messages
+                {identity &&
+                  getUnread(
+                    `admin_driver_${identity.getPrincipal().toText()}`,
+                  ) > 0 && (
+                    <span className="min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                      {getUnread(
+                        `admin_driver_${identity.getPrincipal().toText()}`,
+                      ) > 99
+                        ? "99+"
+                        : getUnread(
+                            `admin_driver_${identity.getPrincipal().toText()}`,
+                          )}
+                    </span>
+                  )}
+              </span>
             </TabsTrigger>
           </TabsList>
 
@@ -940,6 +986,8 @@ export default function DriverDashboard() {
                         loadAvailable();
                         loadMine();
                       }}
+                      getUnread={getUnread}
+                      markRead={markRead}
                     />
                   </div>
                 ))}

@@ -42,6 +42,7 @@ import type {
   UserProfile,
 } from "../backend.d";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { useUnreadCounts } from "../hooks/useUnreadCounts";
 import { getBackend, setBackendIdentity } from "../utils/backendSingleton";
 
 function formatDate(ts: bigint): string {
@@ -391,6 +392,7 @@ function DriverChatPanelAdmin({
 
 function DriversTab() {
   const [principalInput, setPrincipalInput] = useState("");
+  const { getUnread, markRead } = useUnreadCounts();
   const [drivers, setDrivers] = useState<DriverProfile[]>([]);
   const [loadingDrivers, setLoadingDrivers] = useState(false);
   const [promoting, setPromoting] = useState(false);
@@ -401,6 +403,9 @@ function DriversTab() {
   const [promotingApp, setPromotingApp] = useState<string | null>(null);
   const [openChat, setOpenChat] = useState<string | null>(null);
   const [openAppChat, setOpenAppChat] = useState<string | null>(null);
+  const [appProfiles, setAppProfiles] = useState<
+    Record<string, UserProfile | null>
+  >({});
 
   const loadDrivers = async () => {
     setLoadingDrivers(true);
@@ -421,6 +426,18 @@ function DriversTab() {
       const backend = await getBackend();
       const result = await backend.getDriverApplications();
       setApplications(result.sort((a, b) => Number(b.timestamp - a.timestamp)));
+      const profiles: Record<string, UserProfile | null> = {};
+      await Promise.all(
+        result.map(async (app) => {
+          try {
+            const p = app.applicantPrincipal;
+            profiles[p.toText()] = await backend.getUserProfile(p);
+          } catch {
+            /* ignore */
+          }
+        }),
+      );
+      setAppProfiles(profiles);
     } catch {
       toast.error("Failed to load driver applications.");
     } finally {
@@ -541,6 +558,7 @@ function DriversTab() {
           <div className="space-y-3">
             {applications.map((app, i) => {
               const pText = app.applicantPrincipal.toText();
+              const preferredName = appProfiles[pText]?.name;
               return (
                 <div
                   key={app.id.toString()}
@@ -578,19 +596,36 @@ function DriversTab() {
                       )}
                       {promotingApp === pText ? "Promoting..." : "Promote"}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setOpenAppChat(openAppChat === pText ? null : pText)
-                      }
-                      className="gap-1.5 text-xs shrink-0"
-                      data-ocid={`admin.applications.open_modal_button.${i + 1}`}
-                    >
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      Chat
-                    </Button>
+                    <div className="relative">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (openAppChat !== pText)
+                            markRead(`admin_driver_${pText}`);
+                          setOpenAppChat(openAppChat === pText ? null : pText);
+                        }}
+                        className="gap-1.5 text-xs shrink-0"
+                        data-ocid={`admin.applications.open_modal_button.${i + 1}`}
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        Chat
+                      </Button>
+                      {openAppChat !== pText &&
+                        getUnread(`admin_driver_${pText}`) > 0 && (
+                          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none pointer-events-none">
+                            {getUnread(`admin_driver_${pText}`) > 99
+                              ? "99+"
+                              : getUnread(`admin_driver_${pText}`)}
+                          </span>
+                        )}
+                    </div>
                   </div>
+                  {preferredName && (
+                    <p className="text-sm font-medium text-foreground">
+                      {preferredName}
+                    </p>
+                  )}
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     {app.message}
                   </p>
@@ -710,16 +745,29 @@ function DriversTab() {
                       </span>
                     </div>
                     <div className="flex gap-1.5 shrink-0">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setOpenChat(isChatOpen ? null : pText)}
-                        className="gap-1.5 text-xs"
-                        data-ocid={`admin.drivers.open_modal_button.${i + 1}`}
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" />
-                        {isChatOpen ? "Close" : "Chat"}
-                      </Button>
+                      <div className="relative">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (!isChatOpen) markRead(`admin_driver_${pText}`);
+                            setOpenChat(isChatOpen ? null : pText);
+                          }}
+                          className="gap-1.5 text-xs"
+                          data-ocid={`admin.drivers.open_modal_button.${i + 1}`}
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          {isChatOpen ? "Close" : "Chat"}
+                        </Button>
+                        {!isChatOpen &&
+                          getUnread(`admin_driver_${pText}`) > 0 && (
+                            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none pointer-events-none">
+                              {getUnread(`admin_driver_${pText}`) > 99
+                                ? "99+"
+                                : getUnread(`admin_driver_${pText}`)}
+                            </span>
+                          )}
+                      </div>
                       <Button
                         size="sm"
                         variant="outline"
@@ -769,6 +817,7 @@ export default function AdminPage() {
   const [markingPaidIds, setMarkingPaidIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [expandedMsg, setExpandedMsg] = useState<Set<string>>(new Set());
+  const { getUnread, markRead } = useUnreadCounts();
   const [customerProfiles, setCustomerProfiles] = useState<
     Record<string, UserProfile | null>
   >({});
@@ -942,8 +991,12 @@ export default function AdminPage() {
   const toggleMsgPanel = (key: string) => {
     setExpandedMsg((prev) => {
       const s = new Set(prev);
-      if (s.has(key)) s.delete(key);
-      else s.add(key);
+      if (s.has(key)) {
+        s.delete(key);
+      } else {
+        s.add(key);
+        markRead(`order_admin_${key}`);
+      }
       return s;
     });
   };
@@ -1289,15 +1342,22 @@ export default function AdminPage() {
                         <button
                           type="button"
                           onClick={() => toggleMsgPanel(key)}
-                          className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors pt-1"
+                          className="relative flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors pt-1"
                           data-ocid="admin.messages.open_modal_button"
                         >
                           <MessageCircle className="w-4 h-4" />
                           {msgOpen ? "Hide Messages" : "Message Customer"}
+                          {!msgOpen && getUnread(`order_admin_${key}`) > 0 && (
+                            <span className="ml-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                              {getUnread(`order_admin_${key}`) > 99
+                                ? "99+"
+                                : getUnread(`order_admin_${key}`)}
+                            </span>
+                          )}
                           {msgOpen ? (
-                            <ChevronUp className="w-3.5 h-3.5" />
+                            <ChevronUp className="w-3.5 h-3.5 ml-auto" />
                           ) : (
-                            <ChevronDown className="w-3.5 h-3.5" />
+                            <ChevronDown className="w-3.5 h-3.5 ml-auto" />
                           )}
                         </button>
 

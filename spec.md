@@ -1,29 +1,23 @@
 # Brink
 
 ## Current State
-- Admin can chat with promoted drivers via admin-driver messaging (sendAdminDriverMessage / sendDriverToAdminMessage / getAdminDriverMessages)
-- Backend restricts sendDriverToAdminMessage to users in the `drivers` Set only
-- Pending driver applicants have no way to receive or reply to admin messages
-- Admin sees pending applications in Drivers tab but no Chat button per applicant
-- User account dialog shows principal ID but no Messages section
+Images sent in admin chats display with hardcoded /api/blob/ URLs in HomePage.tsx and MyOrdersPage.tsx causing broken images. DriverDashboard.tsx correctly uses getBlobUrl(). MyOrdersPage DriverChatDrawer does not show driver images and customers cannot send images.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Backend: `sendApplicantToAdminMessage(text)` -- allows any logged-in non-anonymous user to send a message in their thread (reuses adminDriverMessages keyed by principal)
-- Backend: `getMyAdminMessages()` -- allows any logged-in user to read their own thread with admin
-- Admin > Drivers tab > Pending Applications: Chat button per applicant opens same chat panel UI as driver chat
-- User account dialog: "Messages" tab showing their admin message thread with a reply input
+- Image display in DriverChatDrawer using getBlobUrl
+- Image upload/send capability for customers in DriverChatDrawer
 
 ### Modify
-- Backend: `sendAdminDriverMessage` already works fine; extend to also allow messaging applicants (no principal validation on whether they are a driver)
-- Backend: `getAdminDriverMessages` -- already allows admin and the principal themselves; no change needed
+- HomePage.tsx OrderMessages: use getBlobUrl instead of /api/blob/
+- MyOrdersPage.tsx AdminMessagesDrawer: use getBlobUrl
+- MyOrdersPage.tsx DriverChatDrawer: show images + image upload UI
 
 ### Remove
-- Nothing
+- All hardcoded /api/blob/ URL patterns
 
 ## Implementation Plan
-1. Add `sendApplicantToAdminMessage` and `getMyAdminMessages` backend functions
-2. Remove driver-only restriction from `sendAdminDriverMessage` so admin can message any principal (applicants too)
-3. Admin > Drivers tab: add Chat button per applicant row, reuse DriverChatPanel component
-4. Header account dialog: add Messages tab with a simple polling chat panel calling getMyAdminMessages / sendApplicantToAdminMessage
+1. Fix HomePage.tsx: import useBlobStorage, use getBlobUrl in OrderMessages
+2. Fix MyOrdersPage.tsx AdminMessagesDrawer: use getBlobUrl
+3. Fix MyOrdersPage.tsx DriverChatDrawer: show images with getBlobUrl, add image upload before send

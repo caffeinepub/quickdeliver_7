@@ -15,6 +15,7 @@ export type { UserProfile };
 interface AppContextType {
   isAdmin: boolean;
   isDriver: boolean;
+  rolesLoaded: boolean;
   userProfile: UserProfile | null;
   refreshProfile: () => Promise<void>;
 }
@@ -25,30 +26,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const { identity } = useInternetIdentity();
   const [isAdmin, setIsAdmin] = useState(false);
   const [isDriver, setIsDriver] = useState(false);
+  const [rolesLoaded, setRolesLoaded] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   const refreshProfile = useCallback(async () => {
     try {
       const b = await getBackend();
       const profile = await b.getCallerUserProfile();
-      // profile is UserProfile | null — set directly, null means no profile saved yet
       setUserProfile(profile ?? null);
     } catch {
-      // Don't throw — just leave existing profile state intact
       setUserProfile(null);
     }
   }, []);
 
   useEffect(() => {
-    // Always update the singleton identity first so all subsequent calls use it
     setBackendIdentity(identity ?? undefined);
 
     if (!identity) {
       setIsAdmin(false);
       setIsDriver(false);
+      setRolesLoaded(false);
       setUserProfile(null);
       return;
     }
+
+    setRolesLoaded(false);
 
     const init = async () => {
       try {
@@ -62,9 +64,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {
         setIsAdmin(false);
         setIsDriver(false);
+      } finally {
+        setRolesLoaded(true);
       }
 
-      // Load profile after roles — profile may be null if never saved
+      // Load profile after roles
       try {
         const b = await getBackend();
         const profile = await b.getCallerUserProfile();
@@ -79,7 +83,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider
-      value={{ isAdmin, isDriver, userProfile, refreshProfile }}
+      value={{ isAdmin, isDriver, rolesLoaded, userProfile, refreshProfile }}
     >
       {children}
     </AppContext.Provider>

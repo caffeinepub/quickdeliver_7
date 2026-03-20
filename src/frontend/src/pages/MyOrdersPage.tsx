@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  Image as ImageIcon,
   Loader2,
   MapPin,
   MessageCircle,
@@ -18,7 +19,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DeliveryStatus } from "../backend";
 import type { Message, Order } from "../backend.d";
+import { useBlobStorage } from "../hooks/useBlobStorage";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { useUnreadCounts } from "../hooks/useUnreadCounts";
 import { getBackend, setBackendIdentity } from "../utils/backendSingleton";
 
 function formatDate(ts: bigint): string {
@@ -59,6 +62,7 @@ interface AdminMessagesDrawerProps {
 }
 
 function AdminMessagesDrawer({ orderId, open }: AdminMessagesDrawerProps) {
+  const { getBlobUrl } = useBlobStorage();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
@@ -111,7 +115,7 @@ function AdminMessagesDrawer({ orderId, open }: AdminMessagesDrawerProps) {
               <p className="text-foreground leading-relaxed">{msg.text}</p>
               {msg.imageKey && (
                 <img
-                  src={`/api/blob/${msg.imageKey}`}
+                  src={getBlobUrl(msg.imageKey as string)}
                   alt="Attachment from Brink"
                   className="mt-2 rounded-lg max-w-full max-h-48 object-contain border border-border"
                 />
@@ -133,12 +137,17 @@ interface DriverChatDrawerProps {
 }
 
 function DriverChatDrawer({ orderId, open }: DriverChatDrawerProps) {
+  const { upload, getBlobUrl } = useBlobStorage();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
   const [msgText, setMsgText] = useState("");
   const [sending, setSending] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageKey, setImageKey] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -159,13 +168,39 @@ function DriverChatDrawer({ orderId, open }: DriverChatDrawerProps) {
     });
   }, [open, fetched, fetchMessages]);
 
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setUploading(true);
+    try {
+      const result = await upload(file);
+      setImageKey(result.key);
+      toast.success("Image uploaded");
+    } catch {
+      toast.error("Failed to upload image");
+      setImageFile(null);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImageKey(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleSend = async () => {
     if (!msgText.trim()) return;
     setSending(true);
     try {
       const b = await getBackend();
-      await b.sendDriverMessage(orderId, msgText.trim(), null);
+      await b.sendDriverMessage(orderId, msgText.trim(), imageKey);
       setMsgText("");
+      setImageFile(null);
+      setImageKey(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       toast.success("Message sent to driver");
       await fetchMessages();
     } catch {
@@ -210,6 +245,13 @@ function DriverChatDrawer({ orderId, open }: DriverChatDrawerProps) {
               data-ocid={`myorders.driverchat.item.${i + 1}`}
             >
               <p className="text-foreground leading-relaxed">{msg.text}</p>
+              {msg.imageKey && (
+                <img
+                  src={getBlobUrl(msg.imageKey as string)}
+                  alt="Attachment"
+                  className="mt-2 rounded-lg max-w-full max-h-48 object-contain border border-border"
+                />
+              )}
               <p className="text-xs text-muted-foreground mt-1">
                 {formatDate(msg.timestamp)}
               </p>
@@ -217,7 +259,47 @@ function DriverChatDrawer({ orderId, open }: DriverChatDrawerProps) {
           ))}
         </div>
       )}
+      {imageFile && (
+        <div className="flex items-center gap-2 bg-secondary/50 rounded-lg p-2 text-xs">
+          <img
+            src={URL.createObjectURL(imageFile)}
+            alt="Preview"
+            className="w-12 h-12 object-cover rounded"
+          />
+          <span className="flex-1 truncate text-muted-foreground">
+            {imageFile.name}
+          </span>
+          <button
+            type="button"
+            onClick={handleRemoveImage}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="flex gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleImageSelect}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="self-end px-2"
+          data-ocid="myorders.driverchat.upload_button"
+        >
+          {uploading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <ImageIcon className="w-4 h-4" />
+          )}
+        </Button>
         <Textarea
           ref={textareaRef}
           value={msgText}
@@ -260,6 +342,7 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
   const isAuthenticated = !!identity;
 
   const [orders, setOrders] = useState<Order[]>([]);
+  const { getUnread, markRead } = useUnreadCounts();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedMsgs, setExpandedMsgs] = useState<Set<string>>(new Set());
@@ -292,8 +375,12 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
   const toggleMessages = (key: string) => {
     setExpandedMsgs((prev) => {
       const s = new Set(prev);
-      if (s.has(key)) s.delete(key);
-      else s.add(key);
+      if (s.has(key)) {
+        s.delete(key);
+      } else {
+        s.add(key);
+        markRead(`order_admin_${key}`);
+      }
       return s;
     });
   };
@@ -301,8 +388,12 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
   const toggleDriverChat = (key: string) => {
     setExpandedDriverChat((prev) => {
       const s = new Set(prev);
-      if (s.has(key)) s.delete(key);
-      else s.add(key);
+      if (s.has(key)) {
+        s.delete(key);
+      } else {
+        s.add(key);
+        markRead(`order_driver_${key}`);
+      }
       return s;
     });
   };
@@ -489,6 +580,13 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
                   >
                     <MessageCircle className="w-4 h-4" />
                     {msgsOpen ? "Hide Messages" : "Messages from Brink"}
+                    {!msgsOpen && getUnread(`order_admin_${key}`) > 0 && (
+                      <span className="ml-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                        {getUnread(`order_admin_${key}`) > 99
+                          ? "99+"
+                          : getUnread(`order_admin_${key}`)}
+                      </span>
+                    )}
                     {msgsOpen ? (
                       <ChevronUp className="w-3.5 h-3.5 ml-auto" />
                     ) : (
@@ -511,6 +609,14 @@ export default function MyOrdersPage({ onNavigate }: MyOrdersPageProps) {
                         {driverChatOpen
                           ? "Hide Driver Chat"
                           : "Chat with Driver"}
+                        {!driverChatOpen &&
+                          getUnread(`order_driver_${key}`) > 0 && (
+                            <span className="ml-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                              {getUnread(`order_driver_${key}`) > 99
+                                ? "99+"
+                                : getUnread(`order_driver_${key}`)}
+                            </span>
+                          )}
                         {driverChatOpen ? (
                           <ChevronUp className="w-3.5 h-3.5 ml-auto" />
                         ) : (
