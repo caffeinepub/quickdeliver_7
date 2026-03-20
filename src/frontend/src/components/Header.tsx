@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   Check,
   Copy,
+  Download,
   Info,
   Loader2,
   Package,
@@ -24,6 +25,9 @@ import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend } from "../utils/backendSingleton";
+
+const APP_DOWNLOAD_URL =
+  "https://drive.google.com/file/d/1jjVK_AQkdHp-SL6zvJDI612g0bsP3g_W/view?usp=drivesdk";
 
 interface HeaderProps {
   onNavigate: (page: string) => void;
@@ -110,6 +114,18 @@ export default function Header({ onNavigate }: HeaderProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Download App button */}
+          <a
+            href={APP_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden sm:inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-lg bg-accent-color/10 text-accent-color hover:bg-accent-color/20 transition-colors border border-accent-color/20"
+            data-ocid="header.download.link"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download App
+          </a>
+
           {isAdmin && (
             <Button
               variant="ghost"

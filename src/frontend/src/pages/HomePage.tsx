@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowRight,
   CheckCircle2,
+  Download,
   Loader2,
   MapPin,
   MessageCircle,
@@ -29,6 +30,9 @@ import type { Message } from "../backend.d";
 import { useApp } from "../context/AppContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { getBackend } from "../utils/backendSingleton";
+
+const APP_DOWNLOAD_URL =
+  "https://drive.google.com/file/d/1jjVK_AQkdHp-SL6zvJDI612g0bsP3g_W/view?usp=drivesdk";
 
 interface FormState {
   request: string;
@@ -265,14 +269,26 @@ export default function HomePage() {
             No menus. No limits. Car parts, alcohol, groceries, smokes — if you
             need it, we&apos;ll get it.
           </p>
-          <a
-            href="#request"
-            className="inline-flex items-center gap-2 bg-accent-color hover:bg-accent-hover text-white font-semibold px-8 py-3.5 rounded-full transition-all duration-200 text-base shadow-lg shadow-accent-color/25 hover:shadow-accent-color/40 hover:-translate-y-0.5"
-            data-ocid="hero.primary_button"
-          >
-            Place a Request
-            <ArrowRight className="w-4 h-4" />
-          </a>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <a
+              href="#request"
+              className="inline-flex items-center gap-2 bg-accent-color hover:bg-accent-hover text-white font-semibold px-8 py-3.5 rounded-full transition-all duration-200 text-base shadow-lg shadow-accent-color/25 hover:shadow-accent-color/40 hover:-translate-y-0.5"
+              data-ocid="hero.primary_button"
+            >
+              Place a Request
+              <ArrowRight className="w-4 h-4" />
+            </a>
+            <a
+              href={APP_DOWNLOAD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white font-semibold px-8 py-3.5 rounded-full transition-all duration-200 text-base border border-white/20 hover:border-white/40 hover:-translate-y-0.5"
+              data-ocid="hero.download_button"
+            >
+              <Download className="w-4 h-4" />
+              Download the App
+            </a>
+          </div>
         </motion.div>
       </section>
 
@@ -509,6 +525,40 @@ export default function HomePage() {
               </motion.div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Download App CTA */}
+      <section className="py-16 px-4">
+        <div className="max-w-2xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="bg-card border border-card-border rounded-2xl shadow-card-modern p-8 text-center"
+          >
+            <div className="w-12 h-12 rounded-xl bg-accent-color/10 flex items-center justify-center mx-auto mb-4">
+              <Download className="w-6 h-6 text-accent-color" />
+            </div>
+            <h2 className="font-display text-2xl font-bold mb-2">
+              Get the Brink App
+            </h2>
+            <p className="text-muted-foreground text-sm mb-6 max-w-md mx-auto">
+              Order on the go with the Brink mobile app. Tap to download and
+              start requesting deliveries in seconds.
+            </p>
+            <a
+              href={APP_DOWNLOAD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-full bg-accent-color text-white font-semibold hover:bg-accent-color/90 transition-all shadow-lg shadow-accent-color/25 hover:-translate-y-0.5"
+              data-ocid="homepage.download_button"
+            >
+              <Download className="w-4 h-4" />
+              Download the App
+            </a>
+          </motion.div>
         </div>
       </section>
 
