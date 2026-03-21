@@ -1,23 +1,26 @@
 # Brink
 
 ## Current State
-Images sent in admin chats display with hardcoded /api/blob/ URLs in HomePage.tsx and MyOrdersPage.tsx causing broken images. DriverDashboard.tsx correctly uses getBlobUrl(). MyOrdersPage DriverChatDrawer does not show driver images and customers cannot send images.
+All backend data (orders, profiles, messages, admin principal, drivers, applications) is stored in non-stable mutable variables. Every deployment wipes all data and resets `_stableAdminPrincipal` to null, causing `isAdminCaller` to return false for everyone, breaking all admin actions (delete order, delete application, load orders, etc.).
 
 ## Requested Changes (Diff)
 
 ### Add
-- Image display in DriverChatDrawer using getBlobUrl
-- Image upload/send capability for customers in DriverChatDrawer
+- `stable var` declarations for all persistent data (admin principal, order/profile/message/driver/application data)
+- `system func preupgrade()` to serialize mutable state to stable arrays before upgrade
+- `system func postupgrade()` to restore mutable state from stable arrays after upgrade
 
 ### Modify
-- HomePage.tsx OrderMessages: use getBlobUrl instead of /api/blob/
-- MyOrdersPage.tsx AdminMessagesDrawer: use getBlobUrl
-- MyOrdersPage.tsx DriverChatDrawer: show images + image upload UI
+- `var _stableAdminPrincipal` → `stable var _stableAdminPrincipal` (critical fix)
+- `nextOrderId`, `nextMessageId`, `nextDriverApplicationId` → backed by stable vars
+- All mutable Maps/Sets/Lists → initialized from stable arrays on startup
 
 ### Remove
-- All hardcoded /api/blob/ URL patterns
+- Nothing removed
 
 ## Implementation Plan
-1. Fix HomePage.tsx: import useBlobStorage, use getBlobUrl in OrderMessages
-2. Fix MyOrdersPage.tsx AdminMessagesDrawer: use getBlobUrl
-3. Fix MyOrdersPage.tsx DriverChatDrawer: show images with getBlobUrl, add image upload before send
+1. Add stable backing variables for all mutable state
+2. Initialize mutable collections from stable arrays at actor startup
+3. Implement `preupgrade` to snapshot mutable state to stable arrays
+4. Implement `postupgrade` to restore from stable arrays and reset counters
+5. Keep all existing public API signatures unchanged
