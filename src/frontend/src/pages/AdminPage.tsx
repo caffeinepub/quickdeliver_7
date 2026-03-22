@@ -393,6 +393,7 @@ function DriverChatPanelAdmin({
 
 function DriversTab() {
   const [principalInput, setPrincipalInput] = useState("");
+  const { identity } = useInternetIdentity();
   const { getUnread, markRead } = useUnreadCounts();
   const [drivers, setDrivers] = useState<DriverProfile[]>([]);
   const [loadingDrivers, setLoadingDrivers] = useState(false);
@@ -482,6 +483,7 @@ function DriversTab() {
   const handleDeleteApplication = async (id: bigint) => {
     setDeletingApp(id);
     try {
+      if (identity) setBackendIdentity(identity);
       const backend = await getBackend();
       await backend.deleteDriverApplication(id);
       toast.success("Application deleted.");
@@ -1002,6 +1004,7 @@ export default function AdminPage() {
       return;
     setDeletingIds((prev) => new Set(prev).add(key));
     try {
+      if (identity) setBackendIdentity(identity);
       const backend = await getBackend();
       await backend.deleteOrder(orderId);
       toast.success(`Order #${key} deleted.`);
